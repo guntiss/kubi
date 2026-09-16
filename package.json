@@ -1,0 +1,152 @@
+{
+  "name": "kubi",
+  "displayName": "Kubi - Kubernetes at lightning speed",
+  "description": "Manage Kubernetes clusters in VS Code at lightning speed.",
+  "version": "1.0.0",
+  "publisher": "guntiss",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "keywords": [
+    "kubernetes",
+    "k8s",
+    "kubectl",
+    "kubeconfig",
+    "devops",
+    "cluster",
+    "gui",
+    "dashboard"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guntiss/kubi.git"
+  },
+  "bugs": {
+    "url": "https://github.com/guntiss/kubi/issues"
+  },
+  "homepage": "https://github.com/guntiss/kubi",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "activationEvents": [
+    "onWebviewPanel:kubi.dashboard"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kubi",
+          "title": "Kubi",
+          "icon": "media/icon-mono.svg"
+        }
+      ]
+    },
+    "views": {
+      "kubi": [
+        {
+          "id": "kubi.contexts",
+          "name": "Contexts"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "kubi.open",
+        "title": "Kubi: Open Dashboard"
+      },
+      {
+        "command": "kubi.refreshContexts",
+        "title": "Kubi: Refresh Contexts",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "kubi.openContext",
+        "title": "Kubi: Open Cluster",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "kubi.setCurrentContext",
+        "title": "Kubi: Set as Current Context",
+        "icon": "$(check)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "kubi.refreshContexts",
+          "when": "view == kubi.contexts",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "kubi.openContext",
+          "when": "view == kubi.contexts && viewItem == k8scontext",
+          "group": "inline@1"
+        },
+        {
+          "command": "kubi.setCurrentContext",
+          "when": "view == kubi.contexts && viewItem == k8scontext",
+          "group": "ctx@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "kubi.openContext",
+          "when": "false"
+        },
+        {
+          "command": "kubi.setCurrentContext",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Kubi",
+      "properties": {
+        "kubi.kubectlPath": {
+          "type": "string",
+          "default": "kubectl",
+          "description": "Path to the kubectl binary."
+        },
+        "kubi.kubeconfigPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Kubeconfig file to use instead of the default. Leave empty to use `$KUBECONFIG`, or `~/.kube/config` when that is unset. Accepts `~`, and several files joined by `:` (`;` on Windows), like `$KUBECONFIG` itself."
+        },
+        "kubi.editorCommand": {
+          "type": "string",
+          "default": "code --wait",
+          "description": "Editor command used as KUBE_EDITOR for 'kubectl edit'. Must block until the file is closed (e.g. 'code --wait')."
+        },
+        "kubi.autoRefreshSeconds": {
+          "type": "number",
+          "default": 5,
+          "description": "Auto-refresh interval in seconds. 0 disables auto-refresh."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "npm run compile && npm run minify",
+    "minify": "npm run minify:ext && npm run minify:webview",
+    "minify:ext": "esbuild out/*.js --minify --outdir=out --allow-overwrite --log-level=warning && rm -f out/*.js.map",
+    "minify:webview": "esbuild media/dashboard.js media/dashboard.css --minify --outdir=out/media --log-level=warning",
+    "package": "npx --no-install vsce package",
+    "publish": "npx --no-install vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.4.0"
+  }
+}

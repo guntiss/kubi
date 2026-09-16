@@ -1,0 +1,1619 @@
+:root {
+  --rail-width: 168px;
+  --radius: 6px;
+  --ok: var(--vscode-charts-green, #89d185);
+  --warn: var(--vscode-charts-yellow, #cca700);
+  --bad: var(--vscode-charts-red, #f14c4c);
+  --muted: var(--vscode-descriptionForeground);
+  --border: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  /*
+   * Backing for the title + filter band: the same colour the rail uses, so the
+   * chrome around the table reads as one surface. The fallback is a neutral
+   * tint rather than `transparent` (the rail's fallback) because the band sits
+   * over the editor background and would otherwise vanish.
+   */
+  --header-bg: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.14));
+  --action-bar-height: 38px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+}
+
+/*
+ * The outer frame. The border sits on #app rather than body so it hugs the
+ * rail and content as one surface; height is 100vh with border-box sizing, so
+ * the 1px edges come out of the viewport instead of adding a scrollbar.
+ */
+#app {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+/*
+ * Selection policy. The list views are a control surface: rows are click
+ * targets, so a double-click or a drag across the table should not leave a
+ * blue smear behind. Selection is therefore off by default and switched back
+ * on only where the text is there to be read and copied — the details modal,
+ * the about page, and any error output, which is the first thing anyone wants
+ * to paste somewhere. Form controls keep it too; without the opt-in the
+ * search field could not be edited by selection.
+ */
+#app { user-select: none; }
+.modal,
+.about,
+.overview,
+.state.error,
+input,
+textarea { user-select: text; }
+
+/* Labels on click targets stay unselectable even inside the opted-in areas. */
+button { user-select: none; }
+
+/* ---------- nav rail ---------- */
+
+.rail {
+  width: var(--rail-width);
+  flex: 0 0 var(--rail-width);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  /* The rail itself no longer scrolls: the brand row and the context/version
+     block are pinned and only .rail-scroll moves. */
+  overflow: hidden;
+  background: var(--vscode-sideBar-background, transparent);
+}
+
+/* The pinned header. `flex: none` keeps it at its natural height instead of
+   being squeezed when the list below is long. */
+.rail > .brand,
+.rail > .context-box { flex: none; }
+
+/*
+ * The scrolling part of the rail. It is itself a column flex so .rail-spacer
+ * can still push About to the bottom when the list is shorter than the rail.
+ */
+.rail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/*
+ * Expanded this is a button covering the rail's whole top bar, so collapsing
+ * is a large target rather than a chevron-sized one. It has to shed the
+ * default button chrome to keep reading as a brand row.
+ */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 16px 10px 12px;
+  font-weight: 600;
+  font-size: 1.05em;
+  letter-spacing: 0.02em;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+button.brand:hover { background: var(--vscode-list-hoverBackground); }
+
+/* Only meaningful on the expanded bar; it hints at which way the rail moves. */
+.brand .chevron {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.9em;
+  flex: none;
+}
+button.brand:hover .chevron { color: var(--vscode-foreground); }
+
+/*
+ * The extension's mark, standing where a status dot used to. It is inline SVG
+ * stroked in `currentColor`, so it picks up the rail's foreground on either
+ * theme; `flex: none` keeps it square when the name beside it is long.
+ */
+.brand .mark {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--vscode-charts-blue, #4a9eff);
+}
+button.brand:hover .mark { color: var(--vscode-foreground); }
+.context-box {
+  padding: 0 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.context-name {
+  font-size: 0.92em;
+  color: var(--muted);
+  padding: 0 4px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sits under the context name; the gitVersion string is long, so it gets its
+   own line rather than competing with the context name. */
+.context-version {
+  font-size: 0.82em;
+  color: var(--muted);
+  padding: 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-label {
+  padding: 14px 10px 6px;
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.nav-item:hover { background: var(--vscode-list-hoverBackground); }
+.nav-item.active {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+  border-left-color: var(--vscode-focusBorder);
+}
+.nav-item .glyph { width: 14px; text-align: center; flex: none; opacity: 0.85; }
+
+/*
+ * The label a collapsed glyph would otherwise hide, flown out on hover. It is
+ * pointer-events: none so it can never sit between the cursor and the item it
+ * describes, and it appears instantly rather than after a tooltip delay.
+ *
+ * Fixed rather than absolute: the rail's list scrolls, and a scroller clips
+ * both axes whichever one asked for it, so an absolutely-positioned flyout was
+ * cut off at the strip's edge. Fixed takes it out of every ancestor's clip;
+ * `placeFlyout` in dashboard.js supplies top/left, and toggles display.
+ */
+.flyout {
+  position: fixed;
+  z-index: 30;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  color: var(--vscode-foreground);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  white-space: nowrap;
+  font-size: 0.92em;
+  font-weight: 400;
+  letter-spacing: normal;
+  pointer-events: none;
+}
+/* Shown by placeFlyout rather than by :hover — it has to be measured and
+   positioned in the same breath it is revealed. */
+/* The active item recolors its children; the flyout is its own surface. */
+.nav-item.active .flyout { color: var(--vscode-foreground); }
+
+/* ---------- main ---------- */
+
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+/*
+ * The header band: title row plus the filter row under it. Both carry the same
+ * tinted background so they read as one surface sitting above the table, which
+ * keeps its own (editor-background) colour.
+ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--header-bg);
+  flex: none;
+}
+
+/* The filter row underneath carries the separator for both. */
+.toolbar.with-filters { border-bottom: none; padding-bottom: 4px; }
+
+/*
+ * Disabled only while a fetch is in flight, which the spinner beside it is
+ * already reporting — so it dims rather than changing shape, and drops the
+ * hover that would invite a click that does nothing.
+ */
+.toolbar button.refresh:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.toolbar button.refresh:disabled:hover {
+  background: var(--vscode-button-secondaryBackground, transparent);
+}
+
+/*
+ * The filter row. Its own line rather than more controls on the toolbar: the
+ * pickers grow with the data — a cluster's status words are not a fixed list —
+ * and would otherwise squeeze out the title, count and freshness label.
+ */
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--header-bg);
+  flex: none;
+  flex-wrap: wrap;
+}
+
+.title { font-size: 1.15em; font-weight: 600; }
+.spacer { flex: 1; }
+
+.freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  /* Reserve the row height so swapping the spinner in doesn't shift the toolbar. */
+  min-height: 12px;
+}
+.freshness.stale { opacity: 0.75; font-style: italic; }
+.freshness.busy { font-style: normal; }
+
+/* A quiet ring that spins only while a refresh is actually in flight. */
+.spinner {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--vscode-progressBar-background, var(--vscode-focusBorder, #0e70c0));
+  border-top-color: transparent;
+  animation: spin 720ms linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2s; }
+}
+
+input.search, select {
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: var(--radius);
+  padding: 5px 9px;
+  font-family: inherit;
+  font-size: inherit;
+  outline: none;
+}
+input.search { width: 240px; }
+input.search:focus, select:focus { border-color: var(--vscode-focusBorder); }
+
+/* The query box takes whatever the pickers leave, down to a usable minimum. */
+.filters input.search { flex: 1; width: auto; min-width: 200px; }
+
+/*
+ * The scope chip: the pod table narrowed to one workload's pods. Styled as a
+ * badge rather than as another picker because it is not a control with
+ * options — it is a statement about what the table is currently showing, and
+ * the badge colours are the theme's own "this is active" pair.
+ */
+/*
+ * The way back out of a drill-down. It leads the filter row, ahead of the chip
+ * naming what was drilled into, because it is navigation rather than a filter —
+ * and styled as a button rather than a pill so it doesn't read as one more
+ * thing narrowing the table.
+ */
+.scope-back {
+  flex: none;
+  padding: 2px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.2));
+  color: var(--vscode-button-secondaryForeground, inherit);
+  font-size: 0.92em;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.scope-back:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.35));
+}
+
+.scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  /* Keeps a long workload name from pushing the search box off the row. */
+  max-width: 320px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  background: var(--vscode-badge-background, rgba(128, 128, 128, 0.3));
+  color: var(--vscode-badge-foreground, inherit);
+  font-size: 0.92em;
+}
+
+/* The kind reads as the label and the name as the value, so the name wins the
+ * weight and the kind is dimmed against the same badge fill. */
+.scope-chip .scope-kind {
+  opacity: 0.75;
+  text-transform: lowercase;
+}
+
+.scope-chip .scope-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Its own dismiss, so leaving a drill-down does not mean clearing every other
+ * filter with it. Sized to a comfortable target inside the pill. */
+.scope-chip .scope-clear {
+  flex: none;
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  font-size: 1.1em;
+}
+
+.scope-chip .scope-clear:hover {
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.35);
+}
+
+/* Capped so a long namespace or status word can't crowd the row. */
+select.ns-picker { max-width: 200px; }
+select.status-picker { max-width: 230px; }
+
+/*
+ * Only actionable while a filter is on, but it stays in the row disabled
+ * rather than vanishing, so the toolbar reads the same either way.
+ */
+button.clear-filters { flex: none; }
+/* Dimmed the same way the refresh button is, and without the hover that would
+ * invite a click that does nothing. */
+button.clear-filters:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+button.clear-filters:disabled:hover {
+  background: var(--vscode-button-secondaryBackground, transparent);
+}
+
+/* The same escape hatch, offered inline when a filter empties the table. */
+button.clear-inline { margin-top: 12px; }
+
+/* Which filters emptied it, under the message rather than inside it. */
+.state-detail { margin-top: 6px; font-size: 0.9em; opacity: 0.8; }
+
+button {
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 11px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+}
+button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground)); }
+button.primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-color: transparent;
+}
+button.primary:hover { background: var(--vscode-button-hoverBackground); }
+button.danger:hover {
+  background: var(--bad);
+  color: #fff;
+  border-color: transparent;
+}
+
+.refresh-error {
+  color: var(--bad);
+  font-size: 0.85em;
+  cursor: help;
+}
+
+.content { flex: 1; overflow: auto; position: relative; }
+
+/* ---------- table ---------- */
+
+table { width: 100%; border-collapse: collapse; }
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 9px 14px;
+  background: var(--vscode-editor-background);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+}
+thead th:hover { color: var(--vscode-foreground); }
+thead th .arrow { opacity: 0.55; font-size: 0.85em; }
+
+tbody td {
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+
+/*
+ * The event message is the column worth reading and the only one without a
+ * predictable width, so it gets whatever the fixed columns leave over rather
+ * than the shared cap. It still ellipsises, with the full text on hover.
+ */
+td.message, th.message { max-width: none; width: 100%; }
+
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--vscode-list-hoverBackground); }
+
+/*
+ * Failing objects (CrashLoopBackOff, NotReady, Failed ...) get a red wash so
+ * they stand out while scanning. A translucent tint rather than a fixed colour,
+ * so it reads the same over light and dark themes and keeps the text legible.
+ */
+tbody tr.bad { background: rgba(244, 76, 76, 0.13); }
+tbody tr.bad:hover { background: rgba(244, 76, 76, 0.22); }
+
+/*
+ * Pending objects (ContainerCreating, Pending, Progressing ...) get the same
+ * treatment in orange: not a failure, but not settled either, so it is worth
+ * spotting in the same sweep of the eye. Orange rather than the yellow of the
+ * status icon, which at this opacity over a light theme washes out to nothing.
+ */
+tbody tr.warn { background: rgba(224, 138, 30, 0.13); }
+tbody tr.warn:hover { background: rgba(224, 138, 30, 0.22); }
+
+/*
+ * A ticked row is tinted more quietly than an open one: it is a member of a
+ * set, not the thing being looked at. The tint still beats the health wash, so
+ * a ticked failing row reads as ticked.
+ */
+tbody tr.checked, tbody tr.checked.bad, tbody tr.checked.warn {
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.18));
+}
+tbody tr.checked:hover, tbody tr.checked.bad:hover, tbody tr.checked.warn:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+/*
+ * The keyboard cursor. An outline rather than a fill, so it can sit on a row
+ * that is ticked, failing or both without arguing with the background those
+ * give it: the fill says what the row is, the outline says where the arrows
+ * are. Inset so it is not clipped by the rows above and below.
+ */
+tbody tr.cursor td {
+  box-shadow: inset 0 1px 0 var(--vscode-focusBorder), inset 0 -1px 0 var(--vscode-focusBorder);
+}
+tbody tr.cursor td:first-child { box-shadow: inset 1px 1px 0 var(--vscode-focusBorder), inset 1px -1px 0 var(--vscode-focusBorder); }
+tbody tr.cursor td:last-child { box-shadow: inset -1px 1px 0 var(--vscode-focusBorder), inset -1px -1px 0 var(--vscode-focusBorder); }
+
+/* Selection outranks the health tint, so it stays obvious what is open. */
+tbody tr.selected, tbody tr.selected.bad, tbody tr.selected.bad:hover,
+tbody tr.selected.warn, tbody tr.selected.warn:hover,
+tbody tr.selected.checked, tbody tr.selected.checked:hover {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+/*
+ * A row that changed under the 10s auto-refresh, lit for a moment so the change
+ * can be caught by someone who was looking at another part of the table. Only
+ * changes that arrived on their own are marked: sorting, filtering and ticking
+ * repaint through the same path, and flashing what the user just did themselves
+ * would train them to ignore the flash.
+ *
+ * Painted with `background-image` on the cells rather than `background` on the
+ * row, because every row background is already spoken for — the health wash,
+ * the tick tint, the open-row fill — and a flash that replaced one of those
+ * would drop the row's real state for the length of the animation. An image
+ * layers over the colour underneath and leaves it intact, so a failing row
+ * flashes and still reads as failing. Cells rather than the row itself because
+ * a row's own background paints behind its cells', where it would be hidden.
+ *
+ * `box-shadow` is left alone for the same reason: the keyboard cursor draws its
+ * outline with it, and a flash using it would erase the cursor as it passed.
+ */
+@keyframes row-flash {
+  from { background-image: linear-gradient(var(--flash-tint), var(--flash-tint)); }
+  to { background-image: linear-gradient(transparent, transparent); }
+}
+
+/* The script removes the class on the same span; see FLASH_MS in dashboard.js. */
+tbody tr.flash > td, tbody tr.flash-new > td {
+  animation: row-flash 2.6s ease-out;
+}
+
+/*
+ * Blue for a row whose values moved, green for one that wasn't there before.
+ * Both are translucent so they read over a light and a dark theme alike, and
+ * over whichever tint the row already carries.
+ */
+tbody tr.flash > td { --flash-tint: rgba(64, 140, 255, 0.30); }
+tbody tr.flash-new > td { --flash-tint: rgba(64, 190, 120, 0.32); }
+
+@media (prefers-reduced-motion: reduce) {
+  /*
+   * The mark still has to be visible — it is information, not decoration — so
+   * it is held steady for the same span and then removed by the same timer,
+   * rather than fading. `steps(1)` holds the opening frame for the whole
+   * duration and never animates between the two.
+   */
+  tbody tr.flash > td, tbody tr.flash-new > td {
+    animation-timing-function: steps(1);
+  }
+}
+
+/*
+ * The checkbox column. Sized to its control and never ellipsised, so it holds
+ * still as the columns beside it change width between kinds.
+ *
+ * The body cell is the tick target, not just the box drawn in it: the row
+ * around it opens details, so this is the only place a mouse can tick and a
+ * 13px square is too small to ask for. The padding it already has for the
+ * column gap doubles as the enlarged target.
+ */
+td.check, th.check {
+  width: 1px;
+  padding-right: 0;
+  overflow: visible;
+}
+td.check { padding-right: 6px; }
+/* The header cell holds a control rather than a sort target. */
+thead th.check { cursor: default; }
+
+input.row-check {
+  display: block;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--vscode-checkbox-selectBackground, var(--vscode-focusBorder));
+}
+input.row-check:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+
+/* ---------- bulk action bar ---------- */
+
+/*
+ * The action bar along the bottom of a table view: the home for anything that
+ * acts on a selection.
+ *
+ * A row of the main column, below the scrolling list rather than inside or over
+ * it. Being permanent is what keeps the list still — a bar that appeared with
+ * the first tick pushed every row down mid-click — and it means the list never
+ * has to reserve space for an overlay, so the last row is always reachable.
+ * The toolbar bounds the view at the top; this bounds it at the bottom.
+ */
+.action-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  height: var(--action-bar-height);
+  padding: 0 10px 0 16px;
+  border-top: 1px solid var(--border);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+/*
+ * Idle, the bar recedes: it is a label and two disabled buttons, and should not
+ * compete with the list above it. It comes up to full contrast once there is a
+ * selection to act on.
+ */
+.action-bar .selection-count {
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+.action-bar .selection-count.none { color: var(--muted); }
+.action-bar.active .selection-count { font-weight: 600; }
+
+/* A quiet secondary beside the action buttons it sits with. */
+.action-bar button.link {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  padding: 4px 8px;
+}
+.action-bar button.link:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-list-hoverBackground);
+}
+
+/*
+ * Disabled is the bar's resting state, so it has to read as "not yet" rather
+ * than as broken: dimmed, but still legibly a button, and without the pointer
+ * cursor that would invite a click.
+ */
+.action-bar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.action-bar button:disabled:hover {
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  border-color: var(--border);
+}
+/* The danger tint belongs to an armed button; disabled it would be a threat
+   about something that cannot happen. */
+.action-bar button.danger:disabled:hover {
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+}
+
+td.numeric, th.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+td.name { font-weight: 500; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 10px;
+  font-size: 0.86em;
+  background: var(--vscode-badge-background, rgba(128,128,128,0.18));
+  color: var(--vscode-badge-foreground, inherit);
+  white-space: nowrap;
+}
+.pill::before {
+  content: '';
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+.pill.ok::before { background: var(--ok); }
+.pill.warn::before { background: var(--warn); }
+.pill.bad::before { background: var(--bad); }
+.pill.muted::before { background: var(--muted); }
+
+tr.selected .pill { background: rgba(255,255,255,0.18); }
+
+/* ---------- item details slide-over ---------- */
+
+/*
+ * The backdrop is fixed to the viewport rather than to the content box, so the
+ * panel stays pinned to the edge of the dashboard and does not drift when the
+ * table behind it scrolls.
+ */
+.modal-backdrop {
+  position: fixed;
+  /* Inset by the width of the #app frame so the backdrop stops at the border
+     rather than painting over it. */
+  inset: 1px;
+  z-index: 10;
+  display: flex;
+  /* Flush to the right edge, full height: the panel is part of the window's
+     furniture rather than a dialog floating in the middle of it. */
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.modal {
+  width: min(560px, 82%);
+  height: 100%;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  /* Nothing inside may spill past the edge the panel is pinned to. */
+  overflow: hidden;
+  /* No slide-in animation: the panel is rebuilt on every re-render, so an
+     entry animation replays on each tab switch and re-renders as a jump. */
+}
+
+.modal header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.modal header .who { min-width: 0; flex: 1; }
+.modal h2 { margin: 0 0 4px; font-size: 1.05em; word-break: break-all; }
+.modal .ns { color: var(--muted); font-size: 0.9em; }
+.modal .close {
+  border: none; background: transparent; font-size: 1.3em; line-height: 1;
+  padding: 0 4px; cursor: pointer; color: var(--muted);
+}
+.modal .close:hover { color: var(--vscode-foreground); background: transparent; }
+
+/* min-height keeps the body, not the panel, as the part that scrolls. */
+.modal .body { padding: 14px 16px; overflow-y: auto; flex: 1; min-height: 0; }
+.modal dl { margin: 0; display: grid; grid-template-columns: minmax(80px, 34%) 1fr; gap: 7px 12px; }
+.modal dt { color: var(--muted); font-size: 0.9em; }
+.modal dd { margin: 0; word-break: break-word; font-size: 0.92em; }
+
+/* ---------- containers, inside the pod details modal ---------- */
+
+.containers { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.containers h3 {
+  margin: 0 0 8px;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--muted);
+  display: flex; align-items: center; gap: 6px;
+}
+.containers h3 .count {
+  font-weight: 400;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--vscode-badge-background, rgba(128,128,128,0.18));
+  color: var(--vscode-badge-foreground, inherit);
+}
+
+.container-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  margin-bottom: 8px;
+}
+.container-card:last-child { margin-bottom: 0; }
+
+.container-head {
+  display: flex; align-items: center; gap: 7px;
+  flex-wrap: wrap;
+  margin-bottom: 7px;
+}
+.container-name {
+  font-weight: 600;
+  font-size: 0.95em;
+  word-break: break-all;
+  min-width: 0;
+}
+/* The state pill is the thing to find first, so it sits at the far end of the
+   row where it lines up down a stack of containers. */
+.container-head .pill { margin-left: auto; }
+
+.tag {
+  font-size: 0.75em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+/* Probes are single letters, so they need to read as a set rather than as
+   initials of something: same box for each, sized to one character. */
+.tag.probe {
+  min-width: 15px;
+  text-align: center;
+  letter-spacing: 0;
+  cursor: default;
+}
+
+.container-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(64px, 22%) 1fr;
+  gap: 4px 10px;
+  font-size: 0.88em;
+}
+.container-facts dt { color: var(--muted); }
+.container-facts dd { margin: 0; word-break: break-word; }
+
+.container-message {
+  margin-top: 7px;
+  font-size: 0.85em;
+  color: var(--vscode-descriptionForeground, var(--muted));
+  border-left: 2px solid var(--warn);
+  padding-left: 8px;
+  word-break: break-word;
+}
+
+.container-actions { display: flex; gap: 6px; margin-top: 8px; }
+.container-actions button { font-size: 0.85em; padding: 2px 9px; }
+.container-actions button[disabled] { opacity: 0.45; cursor: default; }
+
+/* ---------- events, at the foot of the details tab ---------- */
+
+/* Same rule-and-heading treatment as the containers block above it, so the two
+   read as sibling sections rather than one nested in the other. */
+.events-section { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.events-section h3 {
+  margin: 0 0 8px;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--muted);
+  display: flex; align-items: center; gap: 6px;
+}
+.events-section h3 .count {
+  font-weight: 400;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--vscode-badge-background, rgba(128,128,128,0.18));
+  color: var(--vscode-badge-foreground, inherit);
+}
+/* Pushed to the far end so the heading and its count stay together. */
+.events-note {
+  margin-left: auto;
+  font-weight: 400;
+  font-style: italic;
+  opacity: 0.8;
+}
+.events-note.error { color: var(--vscode-errorForeground, #f14c4c); font-style: normal; opacity: 1; }
+
+.events-state { color: var(--muted); font-size: 0.9em; line-height: 1.45; }
+.events-state.error { color: var(--vscode-errorForeground, #f14c4c); }
+
+.events-list { display: flex; flex-direction: column; }
+
+/* Separated by rules rather than boxed like a container card: these are lines
+   of a log, and a border around each would make five events look like five
+   objects. */
+.event-item { padding: 7px 0 8px; border-bottom: 1px solid var(--border); }
+.event-item:first-child { padding-top: 0; }
+.event-item:last-child { border-bottom: 0; padding-bottom: 0; }
+
+/* A bad or warning event is marked at the edge rather than by repainting the
+   line: the pill already carries the colour, and a second red thing next to it
+   competes with it. The bar is what the eye finds when scrolling past a dozen
+   grey Pulled/Created/Started lines, and it costs nothing to the layout —
+   the padding is there whether or not the rule is drawn.
+
+   Only `bad` gets the tint behind it. A pod that pulled an image slowly logs
+   several warnings and none of them is why you opened the panel; tinting those
+   too would leave the Killing line with nothing left to distinguish it. */
+.event-item.bad, .event-item.warn {
+  padding-left: 9px;
+  margin-left: -11px;
+  border-left: 2px solid transparent;
+}
+.event-item.warn { border-left-color: var(--warn); }
+.event-item.bad {
+  border-left-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 9%, transparent);
+}
+/* The reason is the headline of a disruptive event, so it carries the weight;
+   a warning's pill is left at its normal weight so the two stay distinct. */
+.event-item.bad .pill { font-weight: 600; }
+/* Lifted out of the muted grey the routine ones sit in — on the line that
+   says a container was killed, the message is the part worth reading. */
+.event-item.bad .event-message { color: var(--vscode-foreground); }
+
+.event-head { display: flex; align-items: baseline; gap: 8px; }
+
+.event-repeat {
+  color: var(--warn);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-age {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.88em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Wraps rather than truncating: the message is the one field that says what
+   actually happened. */
+.event-message {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.88em;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.events-more {
+  margin-top: 9px;
+  font-size: 0.85em;
+  padding: 2px 9px;
+}
+
+/* The modal's tab strip, between the header and the scrolling pane. */
+.modal .tabs {
+  display: flex; gap: 2px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+.modal .tab {
+  border: none; background: transparent; cursor: pointer;
+  /* Buttons are rounded by default, which would curl the ends of the 2px
+     underline below into a bulge rather than a straight rule. */
+  border-radius: 0;
+  padding: 7px 10px; font-size: 0.9em; color: var(--muted);
+  /* The active underline sits on the strip's own border, so every tab reserves
+     the same height and switching never shifts the pane below. */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.modal .tab:hover { color: var(--vscode-foreground); background: transparent; }
+.modal .tab.active {
+  color: var(--vscode-foreground);
+  border-bottom-color: var(--vscode-focusBorder, var(--vscode-foreground));
+}
+
+/* Describe pane inside the panel. The panel is full height, so the pane fills
+   whatever the header, tabs and action bar leave it; nothing to reserve. */
+.describe-note { font-size: 0.9em; opacity: 0.75; font-style: italic; margin-bottom: 8px; }
+.describe-note.error { color: var(--vscode-errorForeground, #f14c4c); font-style: normal; opacity: 1; }
+.describe-state { color: var(--muted); font-size: 0.9em; }
+.describe-state.error { color: var(--vscode-errorForeground, #f14c4c); }
+.describe-text {
+  margin: 0;
+  /* Describe output is column-aligned, so it needs its own horizontal scroll
+     rather than wrapping lines into each other. */
+  overflow-x: auto;
+  white-space: pre;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.85em;
+  line-height: 1.45;
+  color: var(--vscode-foreground);
+}
+
+/*
+ * Colouring inside describe output. The point is to let the eye land on the
+ * one line that matters in a few hundred, so the palette is deliberately thin:
+ * structure is dimmed or emphasised, and only values that carry a verdict get
+ * a hue. Tokens come from the theme's own chart/symbol colours, so this reads
+ * correctly in light and dark alike.
+ */
+.describe-text .d-line { min-height: 1.45em; }
+
+/* Section headers (Events:, Containers:) anchor the scroll — the one thing
+   loud enough to find while flicking past. */
+.d-section {
+  color: var(--vscode-symbolIcon-classForeground, var(--vscode-foreground));
+  font-weight: 600;
+}
+
+/* Field names are scaffolding: present, but never competing with the value
+   beside them, which is what is actually being read. */
+.d-key { color: var(--muted); }
+
+.d-value { color: var(--vscode-foreground); }
+.d-value.good { color: var(--ok); }
+.d-value.warn { color: var(--warn); }
+.d-value.bad { color: var(--bad); font-weight: 600; }
+
+/* A table's own header and rule row: structure, not content. Dimmed so the
+   rows beneath them read as the data they label. */
+.d-th, .d-rule { color: var(--muted); }
+.d-rule { opacity: 0.55; }
+
+/* The Type column of an events table. A badge rather than plain colour: events
+   are the densest part of the output, and a Warning has to survive being one
+   token in a wall of prose. */
+.d-event {
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 0 4px;
+  margin: 0 -4px;
+}
+.d-event.good { color: var(--ok); }
+.d-event.warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+}
+
+.modal .actions {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 12px 16px; border-top: 1px solid var(--border);
+}
+
+.modal .actions button[disabled] {
+  opacity: 0.5; cursor: default;
+}
+
+/* ---------- states ---------- */
+
+.state { padding: 40px 20px; text-align: center; color: var(--muted); }
+.state.error { color: var(--bad); white-space: pre-wrap; text-align: left; padding: 20px; font-family: var(--vscode-editor-font-family); font-size: 0.9em; }
+
+.hint { font-size: 0.85em; color: var(--muted); margin-top: 6px; }
+
+/*
+ * The "nothing here" message, now living inside the table so the column header
+ * stays put. It has to shed the row styling around it: it is not clickable, not
+ * hoverable, and its text wraps rather than ellipsising like a cell.
+ */
+tbody tr.empty-row { cursor: default; }
+tbody tr.empty-row:hover { background: transparent; }
+tbody td.empty-cell {
+  border-bottom: none;
+  white-space: normal;
+  overflow: visible;
+  max-width: none;
+  padding: 0;
+}
+tbody td.empty-cell .state { padding: 40px 20px; }
+
+/* ---------- skeletons ---------- */
+
+/*
+ * Drawn while a view has nothing to show yet, in the shape of the content that
+ * is coming. It paints on the first frame rather than fading in late like the
+ * old "Loading…" label: a shape makes no claim that a cache replay would have
+ * to retract, so there is no flash to avoid and no gap to sit through.
+ *
+ * Nothing here is interactive — it is scenery, and clicks must not land on a
+ * row that isn't there yet.
+ */
+.skeleton { pointer-events: none; user-select: none; }
+
+.sk-bar {
+  display: block;
+  height: 10px;
+  border-radius: 4px;
+  /* Tinted from the foreground so it reads as placeholder in both themes
+     without hard-coding a grey that disappears on one of them. */
+  background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+  position: relative;
+  overflow: hidden;
+}
+
+/*
+ * The sweep travels across each bar rather than the pane, so bars of different
+ * widths all animate, and a bar scrolled out of view costs nothing.
+ */
+.sk-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--vscode-foreground) 10%, transparent),
+    transparent
+  );
+  animation: sk-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes sk-sweep { to { transform: translateX(100%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The bars alone still read as "not here yet"; only the motion goes. */
+  .sk-bar::after { animation: none; }
+}
+
+/* Table skeleton: matches thead/tbody metrics so nothing shifts on arrival. */
+.skeleton thead th { color: var(--muted); }
+.skeleton tbody td { padding: 7px 14px; border-bottom: 1px solid var(--border); }
+.sk-check { width: 13px; height: 13px; border-radius: 3px; }
+.sk-button { width: 54px; height: 20px; border-radius: 4px; }
+
+/* About skeleton: plain stacked lines inside the real card boxes. */
+.sk-line { height: 12px; margin-bottom: 10px; }
+.sk-line:last-child { margin-bottom: 0; }
+
+/* Describe skeleton: shorter, tighter lines, matching the monospaced output
+   they stand in for rather than the roomier About cards. */
+.describe-skeleton .sk-line { height: 9px; margin-bottom: 8px; }
+
+/* ---------- collapsed rail ---------- */
+
+/*
+ * The icon strip, entered only through the manual toggle. The rail keeps its
+ * glyphs clickable while collapsed; only the words go away.
+ */
+body.rail-collapsed {
+  --rail-width: 48px;
+}
+body.rail-collapsed .label-text,
+body.rail-collapsed .context-box,
+body.rail-collapsed .rail-label,
+/* The script's collapsed rail leaves the chevron out entirely; the boot shell
+   emits one brand row for both widths, so it is hidden here instead. */
+body.rail-collapsed .brand .chevron,
+body.rail-collapsed .brand .name {
+  display: none;
+}
+body.rail-collapsed .nav-item {
+  justify-content: center;
+  padding: 10px 0;
+}
+/*
+ * The whole strip width is the expand target. It used to be a small button
+ * wrapped around the mark, which left most of the 48px row dead to the click;
+ * the brand is now the button itself, padded to a comfortable row height.
+ */
+body.rail-collapsed .brand {
+  justify-content: center;
+  padding: 14px 0 12px;
+}
+/* A slightly larger mark, now that it is the only thing in the row. */
+body.rail-collapsed .brand .mark { width: 20px; height: 20px; }
+/*
+ * The flyouts are `position: fixed` and so escape this scroller on their own;
+ * the overflow no longer has to be opened up to let them out. See `.flyout`.
+ */
+body.rail-collapsed .rail-scroll { overflow-y: auto; }
+
+/*
+ * A rule between groups, standing in for the section headings a collapsed rail
+ * has no room to print. Both are always in the DOM and CSS picks one: expanded,
+ * the heading names the section and the rule is hidden; collapsed, the heading
+ * goes and the rule separates the glyphs. Inset so it reads as a separator
+ * rather than a second border beside the rail's own edge. The rail omits the
+ * rule above its first group.
+ */
+.rail-divider { display: none; }
+body.rail-collapsed .rail-divider {
+  display: block;
+  height: 1px;
+  background: var(--border);
+  margin: 8px 12px;
+}
+
+
+/* ---------- about ---------- */
+
+/*
+ * Pushes the About item to the bottom of the rail. The rail is a column flex
+ * container, so an empty growing element is what separates "resources" from
+ * the footer without needing a fixed height anywhere.
+ */
+.rail-spacer { flex: 1 1 auto; min-height: 12px; }
+.rail-footer { border-top: 1px solid var(--border); padding-top: 4px; }
+
+.about {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 760px;
+}
+
+.about-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: var(--vscode-editorWidget-background, transparent);
+}
+
+.about-card h3 {
+  margin: 0 0 12px;
+  font-size: 0.95em;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The verdict card is the page's headline, so its border carries the colour. */
+.about-card.compat.ok { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.about-card.compat.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.about-card.compat.bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--border)); }
+
+.compat-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.compat-head h3 { margin: 0; order: -1; }
+.compat-head .pill { margin-left: auto; }
+
+/*
+ * The two versions read as one comparison, so they share a row with the
+ * relation drawn between them rather than sitting in a plain list.
+ */
+.compat-versions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.version-side {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.side-label { font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.side-version { font-size: 1.15em; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.side-version.unreachable { color: var(--bad); font-weight: 400; }
+.side-meta { font-size: 0.8em; color: var(--muted); }
+
+.compat-arrow { flex: none; font-size: 1.1em; color: var(--muted); }
+.compat-arrow.ok { color: var(--ok); }
+.compat-arrow.warn { color: var(--warn); }
+.compat-arrow.bad { color: var(--bad); }
+
+.compat-detail { margin: 12px 0 0; font-size: 0.9em; color: var(--muted); line-height: 1.5; }
+.compat-error {
+  margin: 8px 0 0;
+  font-size: 0.85em;
+  color: var(--bad);
+  font-family: var(--vscode-editor-font-family);
+  word-break: break-word;
+}
+
+.fields { display: flex; flex-direction: column; gap: 9px; }
+
+/*
+ * Build details are grouped per side, so a cluster that never answered simply
+ * contributes no column rather than leaving empty cells in a shared grid.
+ */
+.build-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 20px; }
+.build-side { display: flex; flex-direction: column; gap: 7px; }
+.build-side .field-label { flex: 0 0 62px; }
+
+/* Set apart from the answer above it, since it is a local label, not identity. */
+.aside {
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border);
+}
+
+.field { display: flex; gap: 12px; align-items: baseline; font-size: 0.9em; }
+.field-label { flex: 0 0 140px; color: var(--muted); }
+.field-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.field-value.mono { font-family: var(--vscode-editor-font-family); font-size: 0.95em; }
+
+/* Group names are many and short — chips wrap better than a comma list. */
+.field-value.groups { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 1px 7px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--vscode-badge-background, transparent);
+  font-size: 0.88em;
+}
+
+/*
+ * A plain count next to the heading. Not a .pill: those carry a status dot,
+ * and "how many plugins" is a quantity, not a verdict.
+ */
+.count-badge {
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--vscode-badge-background, transparent);
+  color: var(--vscode-badge-foreground, inherit);
+  font-size: 0.85em;
+  font-weight: 500;
+}
+
+/*
+ * Name and path per row. The name is the column that gets read, so it keeps a
+ * fixed width and the path takes the remaining space — a long krew path
+ * truncates from the left, where the interesting part (the filename) survives.
+ */
+.plugin-list { display: flex; flex-direction: column; gap: 7px; }
+.plugin-row { display: flex; gap: 12px; align-items: baseline; font-size: 0.9em; }
+.plugin-name { flex: 0 0 140px; font-size: 0.95em; }
+.plugin-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.85em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.identity-missing p { margin: 0 0 6px; font-size: 0.9em; }
+.identity-missing .why { color: var(--muted); font-size: 0.85em; }
+
+/*
+ * The cache card. Its button is destructive, so the sentence limiting what it
+ * destroys sits beside it rather than above, where it would be read before the
+ * button and forgotten by the time the button is reached.
+ */
+.cache-note { margin: 0 0 12px; font-size: 0.9em; color: var(--muted); line-height: 1.5; }
+.cache-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cache-why { font-size: 0.85em; color: var(--muted); }
+
+/* The danger tint belongs to an armed button; on a disabled one it is a threat
+   the click cannot carry out. */
+.cache-actions button[disabled] { opacity: 0.45; cursor: default; }
+.cache-actions button.danger[disabled]:hover {
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  border-color: var(--border);
+}
+
+
+/*
+ * ---------- Overview ----------
+ *
+ * The cluster's Warning events, grouped by reason. Same 16px gutter and
+ * max-width as About, so the two full-pane views sit on the same measure.
+ */
+.overview {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 860px;
+  user-select: text;
+}
+
+/* The headline figures, equal width, read before anything else on the page.
+   They wrap rather than shrink: a stat squeezed below its label's width turns
+   into two lines of hyphenated text, which is worse than a second row. */
+.ov-summary { display: flex; flex-wrap: wrap; gap: 10px; }
+
+.ov-stat {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, transparent);
+}
+
+/* Only the counts that are a verdict are coloured; the rest is context. `ok`
+   is the unhealthy-pod stat reading zero — worth stating in green, since "0
+   pods unhealthy" is the one number on this page that is good news. */
+.ov-stat.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.ov-stat.warn .ov-stat-value { color: var(--warn); }
+.ov-stat.bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--border)); }
+.ov-stat.bad .ov-stat-value { color: var(--bad); }
+.ov-stat.ok .ov-stat-value { color: var(--ok); }
+
+.ov-stat-value { font-size: 1.5em; font-weight: 600; line-height: 1.1; }
+.ov-stat-label { font-size: 0.82em; color: var(--muted); }
+
+/* A titled block: the pods, then the events. Both name what they hold and how
+   much of it, so neither list starts mid-thought. */
+.ov-section { display: flex; flex-direction: column; gap: 6px; }
+
+.ov-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* A plain count beside the heading, not a .pill: a section is not a status. */
+.ov-heading-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--vscode-badge-background, rgba(128, 128, 128, 0.2));
+  color: var(--vscode-badge-foreground, inherit);
+}
+
+/* One row per broken pod, in a single bordered block like the event groups. */
+.ov-pods {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ov-pod {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ov-pod:last-child { border-bottom: 0; }
+.ov-pod:hover { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12)); }
+.ov-pod:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+
+/* The status pill leads and is the widest fixed thing on the row, so the names
+   beside it start on a common left edge instead of stepping in and out. */
+.ov-pod .pill { flex: none; min-width: 132px; }
+
+/* The name is what the row is for: it takes the space and truncates last. The
+   8px gap is what separates the name from the "/" the namespace draws after
+   itself — the same pairing the event rows use. */
+.ov-pod-name { display: flex; min-width: 0; gap: 8px; }
+.ov-pod-name .ov-object { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ov-ready,
+.ov-restarts {
+  flex: none;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+/* Restarts are the one number here that is itself a symptom. */
+.ov-restarts { color: var(--warn); }
+
+.ov-groups { display: flex; flex-direction: column; gap: 6px; }
+
+.ov-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/*
+ * The whole head is the toggle, so it is a real button — keyboard-reachable
+ * and announcing its expanded state — reset out of its native chrome to sit
+ * flush in the row.
+ */
+.ov-group-head {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 12px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ov-group-head:hover { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12)); }
+.ov-group-head:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.ov-group.open .ov-group-head { border-bottom: 1px solid var(--border); }
+
+.ov-caret { color: var(--muted); font-size: 0.85em; align-self: center; }
+.ov-reason { font-weight: 600; }
+
+/* The occurrence count, in the warning colour — it is the severity figure. */
+.ov-count {
+  padding: 0 7px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+/*
+ * The newest occurrence, trailing the head. It takes the remaining width and
+ * truncates: it is a hint at what the group contains, and expanding shows it
+ * in full.
+ */
+.ov-newest {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.88em;
+}
+
+.ov-newest .ov-object { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-age { flex: none; font-variant-numeric: tabular-nums; }
+
+.ov-events { display: flex; flex-direction: column; }
+
+.ov-event { padding: 8px 12px 9px 30px; border-bottom: 1px solid var(--border); }
+.ov-event:last-child { border-bottom: 0; }
+
+.ov-event-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.88em;
+}
+
+.ov-ns,
+.ov-object {
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.95em;
+}
+
+.ov-ns { color: var(--muted); }
+.ov-ns::after { content: '/'; padding-left: 8px; color: var(--border); }
+
+.ov-repeat {
+  color: var(--warn);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The message wraps rather than truncating: it is the one field that actually
+ * says what went wrong, and a clipped kubelet message is worth nothing.
+ */
+.ov-message {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.88em;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The all-clear, in the healthy colour — the one place this page is green. */
+.ov-clear { color: var(--ok); font-size: 1.1em; }
+
+/* Overview skeleton: the summary band and collapsed heads, in real geometry. */
+.skeleton.overview { padding: 16px; display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+.skeleton.overview .ov-stat { gap: 8px; }
+.skeleton.overview .ov-group-head { display: flex; gap: 10px; align-items: center; }
+/* The skeleton's pod rows are inert shapes, not buttons. */
+.skeleton.overview .ov-pod { cursor: default; }
+
+/* Stacking the two versions keeps each version string readable when narrow. */
+@media (max-width: 640px) {
+  .compat-versions { flex-direction: column; align-items: stretch; }
+  .compat-arrow { transform: rotate(90deg); align-self: center; }
+  .field { flex-direction: column; gap: 2px; }
+  .field-label { flex: none; }
+  /* Stat boxes across cannot hold a two-digit figure and its label. */
+  .ov-summary { flex-direction: column; }
+  /* The pod's namespace and its ready count both lose to its name. */
+  .ov-pod .ov-ns, .ov-ready { display: none; }
+  .ov-pod .pill { min-width: 0; }
+  /* The newest occurrence is the first thing to go: the reason and count carry
+     the row on their own, and it is repeated in full inside the group. */
+  .ov-newest .ov-object { display: none; }
+}
+
+/*
+ * The rail used to collapse itself here as well. It no longer does: collapsing
+ * is the toggle's job alone, so the rail stays in whatever state the user chose
+ * at every width. Only the secondary columns still drop out, which costs
+ * nothing to get back — the table reflows.
+ */
+@media (max-width: 900px) {
+  .secondary { display: none; }
+}

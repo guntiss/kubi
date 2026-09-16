@@ -1,0 +1,47 @@
+name: Release
+
+# Publishing is driven by a version tag, so what reaches the marketplace is
+# always a commit that exists in the repo:
+#
+#   npm version minor && git push --follow-tags
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Package
+        run: npx @vscode/vsce package --out kubi.vsix
+
+      # Attaches the .vsix to the GitHub release, so the extension can be
+      # installed from here by anyone who would rather not use the marketplace.
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: kubi.vsix
+          generate_release_notes: true
+
+      # Skipped rather than failed when no token is configured: the GitHub
+      # release above is useful on its own, and a missing secret should not
+      # turn a tagged release red.
+      - name: Publish to the VS Code Marketplace
+        if: env.VSCE_PAT != ''
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx @vscode/vsce publish --packagePath kubi.vsix

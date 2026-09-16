@@ -1,0 +1,16 @@
+.vscode/**
+.github/**
+src/**
+out/**/*.map
+node_modules/**
+tsconfig.json
+.gitignore
+.vscodeignore
+*.vsix
+CONTRIBUTING.md
+media/icon.svg
+media/*.gif
+# Shipped minified as out/media/dashboard.* by `npm run minify:webview`.
+media/dashboard.js
+media/dashboard.css
+demo/**
