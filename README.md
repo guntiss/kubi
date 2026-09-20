@@ -1,7 +1,7 @@
 # ⚡ Kubi
 
-[![Marketplace](https://img.shields.io/visual-studio-marketplace/v/guntiss.kubi?label=marketplace)](https://marketplace.visualstudio.com/items?itemName=guntiss.kubi)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/guntiss.kubi)](https://marketplace.visualstudio.com/items?itemName=guntiss.kubi)
+[![Marketplace](https://vsmarketplacebadges.dev/version-short/guntiss.kubi.svg?label=marketplace)](https://marketplace.visualstudio.com/items?itemName=guntiss.kubi)
+[![Installs](https://vsmarketplacebadges.dev/installs-short/guntiss.kubi.svg?label=installs)](https://marketplace.visualstudio.com/items?itemName=guntiss.kubi)
 [![CI](https://github.com/guntiss/kubi/actions/workflows/ci.yml/badge.svg)](https://github.com/guntiss/kubi/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
