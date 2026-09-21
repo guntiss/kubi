@@ -1058,7 +1058,9 @@
   /**
    * Rebuilds the filter row in place, for when one control changes what
    * another offers. Focus is carried across by class, since replacing the node
-   * the change event came from would otherwise drop the keyboard out of it.
+   * the change event came from would otherwise drop the keyboard out of it —
+   * and the filter box carries its caret across too, since rows landing under
+   * a half-typed query come through here.
    */
   function renderFiltersOnly() {
     const node = app.querySelector('.filters');
@@ -1066,10 +1068,13 @@
     const focused = node.contains(document.activeElement)
       ? document.activeElement.className.split(' ')[0]
       : '';
+    const caret = captureSearchFocus();
     const next = renderFilters();
     if (!next) return render();
     node.replaceWith(next);
-    if (focused) {
+    if (caret) {
+      restoreSearchFocus(caret);
+    } else if (focused) {
       const restored = app.querySelector(`.filters .${focused}`);
       if (restored) restored.focus();
     }
@@ -3230,6 +3235,12 @@
         flashChangedRows = !message.stale && hadRows;
         renderContentOnly();
         flashChangedRows = false;
+        // Both pickers count over the rows, so they go stale the moment a new
+        // payload lands. Switching kinds empties the table before the fetch,
+        // and the render that follows builds the row against no rows at all —
+        // leaving every namespace reading (0) over a table full of pods until
+        // something else happened to rebuild it.
+        renderFiltersOnly();
         renderFreshnessOnly();
         break;
       }
