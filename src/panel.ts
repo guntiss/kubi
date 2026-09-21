@@ -57,6 +57,8 @@ type Inbound =
       targets: { name: string; namespace?: string; replicas?: number }[];
     }
   | { type: 'clearCache' }
+  /** The "Preserve cache after updates" tick on the About page. */
+  | { type: 'setPreserveCache'; preserve: boolean }
   /**
    * "Show me the pods of this thing". The owner chain is resolved here rather
    * than in the webview because a Deployment does not own its pods directly —
@@ -81,10 +83,17 @@ export class DashboardPanel {
 
   private static cache(context: vscode.ExtensionContext): DashboardCache {
     // Keyed by extension version, so an upgrade never replays payloads built by
-    // an older `toRow`/`KINDS`. See the note in cache.ts.
+    // an older `toRow`/`KINDS` — unless the user has asked for the cache to
+    // survive updates. See the note in cache.ts.
+    //
+    // Read once, at the store's construction: the setting decides what an
+    // upgrade inherits, which has already happened by the time anything could
+    // be toggled, so re-reading it later would change nothing until the next
+    // update anyway.
     DashboardPanel.cacheInstance ??= new DashboardCache(
       context.globalState,
-      String(context.extension.packageJSON.version ?? '0')
+      String(context.extension.packageJSON.version ?? '0'),
+      vscode.workspace.getConfiguration('kubi').get<boolean>('preserveCacheAfterUpdates') ?? false
     );
     return DashboardPanel.cacheInstance;
   }
@@ -288,6 +297,12 @@ export class DashboardPanel {
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('kubi.autoRefreshSeconds')) {
           this.applyAutoRefresh();
+        }
+        // The About page draws this setting, and it can be changed from VS
+        // Code's own settings UI or from another panel's tick, neither of which
+        // passes through the handler that drew it.
+        if (e.affectsConfiguration('kubi.preserveCacheAfterUpdates')) {
+          this.postCacheStats();
         }
       })
     );
@@ -524,6 +539,14 @@ export class DashboardPanel {
       case 'clearCache':
         await this.clearCache();
         break;
+      case 'setPreserveCache':
+        // Global, like the store it governs: the cache spans every context and
+        // every window, so a per-workspace value would mean the setting applied
+        // or not depending on which folder happened to open the dashboard.
+        await vscode.workspace
+          .getConfiguration('kubi')
+          .update('preserveCacheAfterUpdates', message.preserve, vscode.ConfigurationTarget.Global);
+        break;
       case 'showOwned':
         await this.showOwned(message);
         break;
@@ -631,7 +654,15 @@ export class DashboardPanel {
    * was cached, including itself.
    */
   private postCacheStats(): void {
-    this.post({ type: 'cacheStats', stats: this.cache.stats() });
+    // The preserve tick rides along: it is drawn in the same card, changes on
+    // the same occasions, and is read from settings rather than held by the
+    // webview, so it would otherwise need a message of its own that always
+    // travelled beside this one.
+    this.post({
+      type: 'cacheStats',
+      stats: this.cache.stats(),
+      preserve: vscode.workspace.getConfiguration('kubi').get<boolean>('preserveCacheAfterUpdates') ?? false
+    });
   }
 
   /**

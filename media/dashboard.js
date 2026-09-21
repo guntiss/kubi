@@ -55,6 +55,12 @@
      * itself cached and would report a size frozen at the time it was stored.
      */
     cacheStats: null,
+    /**
+     * Whether the cache is kept across extension updates. Travels with
+     * `cacheStats` because it is drawn in the same card; the extension owns the
+     * value, so a tick here only asks for the change and waits to be told.
+     */
+    preserveCache: false,
     /** True until this kind has ever produced content (cached or fresh). */
     empty: true,
     /** Content on screen came from cache rather than a completed fetch. */
@@ -1781,6 +1787,22 @@
           onclick: () => post({ type: 'clearCache' })
         }, 'Clear cache'),
         el('span', { class: 'cache-why', text: 'Clears stored data only; nothing in any cluster is touched.' })
+      ),
+      // What happens to the cache on an update, under the card that shows what
+      // is in it. The box is inside its own label so the words are part of the
+      // click target, and the caveat sits below rather than in a tooltip: it is
+      // the reason the default is off, so it has to be readable before ticking.
+      el('label', { class: 'cache-option' },
+        el('input', {
+          type: 'checkbox',
+          class: 'row-check',
+          checked: state.preserveCache,
+          onchange: (e) => post({ type: 'setPreserveCache', preserve: e.target.checked })
+        }),
+        el('span', {},
+          el('span', { class: 'cache-option-label', text: 'Preserve cache after updates' }),
+          el('span', { class: 'cache-why', text: 'Off by default, because a view cached by an older build can paint blank cells until its first refresh replaces it.' })
+        )
       )
     );
 
@@ -3256,6 +3278,7 @@
         break;
       case 'cacheStats':
         state.cacheStats = message.stats;
+        state.preserveCache = Boolean(message.preserve);
         // Only About draws these, and a stats message can arrive alongside one
         // of its payloads, so re-rendering elsewhere would be wasted work.
         if (state.active === 'about') render();

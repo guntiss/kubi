@@ -1349,6 +1349,24 @@ body.rail-collapsed .rail-divider {
 .cache-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .cache-why { font-size: 0.85em; color: var(--muted); }
 
+/* The update preference, below the clear button and separated from it: one acts
+   now, the other only ever matters at the next update, so they must not read as
+   a pair of controls over the same thing. The box is top-aligned because the
+   label wraps to two lines and a centred tick would drift away from its first
+   one. */
+.cache-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+.cache-option input { margin-top: 2px; flex: none; }
+.cache-option-label { display: block; font-size: 0.9em; }
+.cache-option .cache-why { display: block; margin-top: 2px; }
+
 /* The danger tint belongs to an armed button; on a disabled one it is a threat
    the click cannot carry out. */
 .cache-actions button[disabled] { opacity: 0.45; cursor: default; }
