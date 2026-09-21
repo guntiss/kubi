@@ -155,8 +155,21 @@ export class DashboardPanel {
   static show(context: vscode.ExtensionContext, contextName: string, contextInfo?: k.ContextInfo): void {
     const existing = DashboardPanel.open.get(contextName);
     if (existing) {
-      existing.panel.reveal(existing.panel.viewColumn ?? vscode.ViewColumn.One);
-      return;
+      // `reveal` throws "Webview is disposed" on a panel VS Code has already
+      // torn down. That happens whenever the map entry outlives the panel:
+      // `onDidDispose` is delivered asynchronously, so between the panel dying
+      // and the handler running, this entry still looks live. Reopening the
+      // context in that window — the tab was just closed, or the whole window
+      // was closed with the dashboard open — would otherwise throw out of a
+      // command handler as an uncaught runtime error.
+      try {
+        existing.panel.reveal(existing.panel.viewColumn ?? vscode.ViewColumn.One);
+        return;
+      } catch {
+        // The entry is stale. Drop it and fall through to open a fresh panel,
+        // rather than leaving the context permanently unopenable.
+        existing.dispose();
+      }
     }
     const panel = vscode.window.createWebviewPanel(
       DashboardPanel.viewType,
@@ -222,7 +235,18 @@ export class DashboardPanel {
     if (closed) {
       return;
     }
-    DashboardPanel.open.set(contextName, new DashboardPanel(panel, context, contextName, info));
+    // The `closed` flag above covers disposal this function observed. Setting
+    // `iconPath` and `html` in the constructor throws "Webview is disposed" on
+    // a panel that went away without that listener seeing it, so the
+    // construction is guarded too rather than throwing out of `revive` and
+    // leaving the restored tab dead with no way to reopen it.
+    let revived: DashboardPanel;
+    try {
+      revived = new DashboardPanel(panel, context, contextName, info);
+    } catch {
+      return;
+    }
+    DashboardPanel.open.set(contextName, revived);
   }
 
   private constructor(
@@ -277,8 +301,17 @@ export class DashboardPanel {
     return `kubi.kind:${this.contextName}`;
   }
 
+  /**
+   * Idempotent: `onDidDispose` runs it, and `show` runs it directly when it
+   * finds a map entry whose panel is already gone.
+   */
   private dispose(): void {
-    DashboardPanel.open.delete(this.contextName);
+    // Only if *this* panel still owns the entry. A stale entry disposed late
+    // could otherwise evict the live panel that replaced it under the same
+    // context name, leaving a working dashboard unreachable by `show`.
+    if (DashboardPanel.open.get(this.contextName) === this) {
+      DashboardPanel.open.delete(this.contextName);
+    }
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
     }
