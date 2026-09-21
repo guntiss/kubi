@@ -125,17 +125,23 @@ The generated bullets are commit subjects, which are rarely the sentence a
 reader wants — edit them before committing. The 1.0.0 entry is the register to
 aim for: what changed, and why it matters to someone using the extension.
 
-Then commit the changelog, bump, and push both:
+Then bump, commit and tag. `.npmrc` sets `git-tag-version=false`, so
+`npm version` only rewrites `package.json` and `package-lock.json` -- the
+commit and the tag are yours to make, once you have read the diff:
 
 ```
-git add CHANGELOG.md && git commit -m "Changelog for 1.0.2"
-npm version patch && git push --follow-tags
+npm version patch
+git add package.json package-lock.json CHANGELOG.md
+git commit -m "Release 1.0.2"
+git tag v1.0.2
+git push --follow-tags
 ```
 
-`npm version` rewrites `package.json`, commits, and creates the tag; never edit
-the `version` field by hand, or the tag and the manifest drift apart. The
-changelog is committed first so the tagged commit is one whose notes are
-already written.
+Always let `npm version` edit the version field rather than typing it, so
+`package-lock.json` stays in step. The bump and its changelog entry belong in
+one commit, and the tag goes on that commit: the workflow packages whatever the
+tag points at, so a tag on a commit that predates the bump publishes the old
+version number.
 
 ## Pull requests
 
