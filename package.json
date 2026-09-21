@@ -139,6 +139,7 @@
     "minify": "npm run minify:ext && npm run minify:webview",
     "minify:ext": "esbuild out/*.js --minify --outdir=out --allow-overwrite --log-level=warning && rm -f out/*.js.map",
     "minify:webview": "esbuild media/dashboard.js media/dashboard.css --minify --outdir=out/media --log-level=warning",
+    "changelog": "node scripts/changelog.js",
     "package": "npx --no-install vsce package",
     "publish": "npx --no-install vsce publish"
   },

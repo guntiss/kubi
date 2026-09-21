@@ -100,6 +100,43 @@ to act on, since the same workload name exists in every cluster.
 
 **Secrets show key names, never values.**
 
+## Releasing
+
+Publishing is driven by a version tag: `.github/workflows/release.yml` fires on
+`v*`, packages the extension, attaches the `.vsix` to a GitHub release and
+pushes to the marketplace. So whatever reaches users is always a commit that
+exists here, and a bump that is never tagged never ships.
+
+Version numbers follow semver: **patch** for fixes and packaging or metadata
+changes, **minor** for new resource kinds, commands or settings, **major** for
+removing or renaming a command or setting, changing a default in a way that
+breaks existing configs, or raising `engines.vscode`.
+
+`npm run changelog` drafts the next entry from the commits since the last tag,
+grouping them into Keep a Changelog sections by their leading verb. It prints
+to stdout by default; `-- --write` inserts it into `CHANGELOG.md` and stops
+there, leaving the commit to you:
+
+```
+npm run changelog -- --write --release patch
+```
+
+The generated bullets are commit subjects, which are rarely the sentence a
+reader wants — edit them before committing. The 1.0.0 entry is the register to
+aim for: what changed, and why it matters to someone using the extension.
+
+Then commit the changelog, bump, and push both:
+
+```
+git add CHANGELOG.md && git commit -m "Changelog for 1.0.2"
+npm version patch && git push --follow-tags
+```
+
+`npm version` rewrites `package.json`, commits, and creates the tag; never edit
+the `version` field by hand, or the tag and the manifest drift apart. The
+changelog is committed first so the tagged commit is one whose notes are
+already written.
+
 ## Pull requests
 
 Please make sure `npm run compile` is clean, and say in the description which
