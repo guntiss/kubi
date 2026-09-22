@@ -2919,7 +2919,7 @@
     const kind = kindOf(state.active);
     const run = (fn) => () => { closeRowMenu(); fn(); };
     const items = [
-      { label: 'Details', run: () => { selectRow(row); renderContentOnly(); } },
+      { label: 'Describe', run: () => { selectRow(row); openDetailTab('describe'); }, title: 'kubectl describe, in the detail panel' },
       null,
       ...objectActions(kind, row)
     ];
