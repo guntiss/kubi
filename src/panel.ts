@@ -93,7 +93,7 @@ export class DashboardPanel {
     DashboardPanel.cacheInstance ??= new DashboardCache(
       context.globalState,
       String(context.extension.packageJSON.version ?? '0'),
-      vscode.workspace.getConfiguration('kubi').get<boolean>('preserveCacheAfterUpdates') ?? false
+      vscode.workspace.getConfiguration('kubi').get<boolean>('preserveCacheAfterUpdates') ?? true
     );
     return DashboardPanel.cacheInstance;
   }
@@ -661,7 +661,7 @@ export class DashboardPanel {
     this.post({
       type: 'cacheStats',
       stats: this.cache.stats(),
-      preserve: vscode.workspace.getConfiguration('kubi').get<boolean>('preserveCacheAfterUpdates') ?? false
+      preserve: vscode.workspace.getConfiguration('kubi').get<boolean>('preserveCacheAfterUpdates') ?? true
     });
   }
 

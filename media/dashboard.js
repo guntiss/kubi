@@ -1804,7 +1804,7 @@
       // What happens to the cache on an update, under the card that shows what
       // is in it. The box is inside its own label so the words are part of the
       // click target, and the caveat sits below rather than in a tooltip: it is
-      // the reason the default is off, so it has to be readable before ticking.
+      // the cost of leaving this on, so it has to be readable without unticking.
       el('label', { class: 'cache-option' },
         el('input', {
           type: 'checkbox',
@@ -1814,7 +1814,7 @@
         }),
         el('span', {},
           el('span', { class: 'cache-option-label', text: 'Preserve cache after updates' }),
-          el('span', { class: 'cache-why', text: 'Off by default, because a view cached by an older build can paint blank cells until its first refresh replaces it.' })
+          el('span', { class: 'cache-why', text: 'A view cached by an older build can paint blank cells until its first refresh replaces it. Untick to start each update with an empty cache.' })
         )
       )
     );

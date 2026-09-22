@@ -170,7 +170,7 @@ and `npm run package` then fails.
 | `kubi.kubeconfigPath` | *(empty)* | Kubeconfig to use instead of the default. Empty means `$KUBECONFIG`, or `~/.kube/config` when that is unset. Accepts `~` and a `:`-joined list, like `$KUBECONFIG` itself. |
 | `kubi.editorCommand` | `code --wait` | Editor used as `KUBE_EDITOR` for `kubectl edit`. Must block until the file is closed. |
 | `kubi.autoRefreshSeconds` | `5` | Auto-refresh interval in seconds; `0` disables. Only visible dashboards refresh. |
-| `kubi.preserveCacheAfterUpdates` | `false` | Keep cached dashboard data when the extension updates. Off by default: a view cached by an older build can paint blank cells until its first refresh replaces it. Also on the About page. |
+| `kubi.preserveCacheAfterUpdates` | `true` | Keep cached dashboard data when the extension updates, so the first dashboard opened after an update paints immediately. Turn it off if you would rather each update start empty: a view cached by an older build can paint blank cells until its first refresh replaces it. Also on the About page. |
 
 ## Roadmap
 - **Support for all standard kubernetes resources** - some are still missing
