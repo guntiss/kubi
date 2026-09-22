@@ -631,11 +631,16 @@ function buildPod(pod: k.KubeObject): Built {
   const ready = statuses.filter((c) => c.ready).length;
   const restarts = statuses.reduce((sum, c) => sum + (c.restartCount ?? 0), 0);
   // Container-level reasons are far more actionable than the coarse pod phase.
-  const reason =
+  let reason =
     statuses.map((c) => c.state?.waiting?.reason ?? c.state?.terminated?.reason).find(Boolean) ??
     pod.status?.reason ??
     pod.status?.phase ??
     'Unknown';
+  // A pod being deleted keeps `phase: Running` until its containers stop; the
+  // deletion timestamp is the only sign, so mirror kubectl and say so.
+  if (pod.metadata.deletionTimestamp) {
+    reason = pod.status?.reason === 'NodeLost' ? 'Unknown' : 'Terminating';
+  }
 
   const allReady = statuses.length > 0 && ready === statuses.length;
   let health: Health = 'bad';
@@ -643,7 +648,7 @@ function buildPod(pod: k.KubeObject): Built {
     health = 'muted';
   } else if (reason === 'Running' && allReady) {
     health = 'ok';
-  } else if (reason === 'Running' || reason === 'ContainerCreating' || reason === 'PodInitializing' || reason === 'Pending') {
+  } else if (reason === 'Running' || reason === 'Terminating' || reason === 'ContainerCreating' || reason === 'PodInitializing' || reason === 'Pending') {
     health = 'warn';
   }
 
