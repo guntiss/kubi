@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // Drafts the next CHANGELOG.md entry from the commits since the last version
-// tag. It only ever writes the file: bumping, tagging and pushing stay manual,
-// so there is always a chance to edit the prose before it becomes a release.
+// tag. It writes files only: tagging and pushing stay manual, so there is
+// always a chance to edit the prose before it becomes a release.
 //
 //   node scripts/changelog.js            # preview the entry on stdout
 //   node scripts/changelog.js --write    # insert it into CHANGELOG.md
 //   node scripts/changelog.js --write --release patch
 //
 // Without --release the entry is headed "Unreleased". With one, the heading
-// carries the version that bump would produce, so the file is ready for the
-// `npm version` that follows.
+// carries the version that bump would produce, and --write also applies that
+// version to package.json and package-lock.json, so the whole release edit is
+// one command. Committing, tagging and pushing stay manual. Pass --no-bump to
+// write the heading only and leave the version alone for `npm version`.
 
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -54,7 +56,7 @@ const SKIP = [
 ];
 
 function parseArgs(argv) {
-  const opts = { write: false, release: null, from: null };
+  const opts = { write: false, release: null, from: null, bump: true };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--write' || arg === '-w') opts.write = true;
@@ -64,7 +66,8 @@ function parseArgs(argv) {
         fail(`--release expects patch, minor or major (got ${level ?? 'nothing'})`);
       }
       opts.release = level;
-    } else if (arg === '--from') opts.from = argv[++i];
+    } else if (arg === '--no-bump') opts.bump = false;
+    else if (arg === '--from') opts.from = argv[++i];
     else if (arg === '--help' || arg === '-h') {
       // Only the header block, which stops at the first non-comment line.
       const lines = fs.readFileSync(__filename, 'utf8').split('\n').slice(1);
@@ -124,6 +127,35 @@ function nextVersion(level) {
   return `${major}.${minor}.${patch + 1}`;
 }
 
+// package.json is rewritten textually rather than via JSON.stringify so the
+// file keeps its own key order, indentation and trailing newline. Only the
+// top-level "version" is touched: it is the first one at a two-space indent,
+// which a dependency's version inside an object can never be.
+function setPackageVersion(version) {
+  const file = path.join(ROOT, 'package.json');
+  const text = fs.readFileSync(file, 'utf8');
+  const pattern = /^(  "version":\s*")([^"]*)(")/m;
+  if (!pattern.test(text)) fail('found no top-level "version" in package.json');
+  fs.writeFileSync(file, text.replace(pattern, `$1${version}$3`));
+}
+
+// The lockfile carries the project's own version twice: at the root and in the
+// packages[""] entry. Every other "version" in there belongs to a dependency,
+// so this walks the structure instead of matching text. Absent lockfile is not
+// an error — not every checkout has one.
+function setLockVersion(version) {
+  const file = path.join(ROOT, 'package-lock.json');
+  if (!fs.existsSync(file)) return false;
+  const text = fs.readFileSync(file, 'utf8');
+  const lock = JSON.parse(text);
+  lock.version = version;
+  if (lock.packages && lock.packages['']) lock.packages[''].version = version;
+  const indent = /^\{\n(\s+)"/.exec(text)?.[1] ?? '  ';
+  const trailing = text.endsWith('\n') ? '\n' : '';
+  fs.writeFileSync(file, JSON.stringify(lock, null, indent.length) + trailing);
+  return true;
+}
+
 function render(subjects, heading) {
   const grouped = new Map();
   for (const subject of subjects) {
@@ -173,6 +205,18 @@ function main() {
   }
 
   insert(entry);
+
+  // Bumping only ever follows a successful insert, so a failure part-way
+  // through cannot leave the version ahead of the changelog.
+  if (opts.release && opts.bump) {
+    setPackageVersion(heading);
+    const locked = setLockVersion(heading);
+    console.error(`changelog: wrote "${heading}" to CHANGELOG.md, package.json${locked ? ' and package-lock.json' : ''} — edit the prose, then commit and tag:`);
+    console.error(`  git commit -am "Release ${heading}"`);
+    console.error(`  git tag v${heading} && git push --follow-tags`);
+    return;
+  }
+
   console.error(`changelog: wrote "${heading}" to CHANGELOG.md — edit it, then commit and bump:`);
   console.error(`  git add CHANGELOG.md && git commit -m "Changelog for ${heading}"`);
   console.error(`  npm version ${opts.release ?? '<patch|minor|major>'} && git push --follow-tags`);
