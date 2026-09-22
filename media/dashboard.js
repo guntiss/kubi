@@ -2778,6 +2778,17 @@
         }))
       })
     },
+    ...['cordon', 'uncordon', 'drain'].map((id) => ({
+      id,
+      applies: (kind) => Boolean(kind && kind.id === 'nodes'),
+      label: (rows) => `${id.charAt(0).toUpperCase()}${id.slice(1)} ${rows.length}${id === 'drain' ? '…' : ''}`,
+      title: (rows, noun) => ({
+        cordon: `Stop new pods being scheduled on the ${rows.length} selected ${noun}`,
+        uncordon: `Let new pods be scheduled on the ${rows.length} selected ${noun} again`,
+        drain: `Cordon the ${rows.length} selected ${noun} and evict their pods, in a terminal`
+      })[id],
+      run: (rows) => post({ type: 'nodeAction', action: id, names: rows.map((row) => row.name) })
+    })),
     {
       id: 'delete',
       danger: true,
@@ -2895,6 +2906,19 @@
         title: kind.id === 'nodes'
           ? 'Show only the pods running on this node'
           : `Show only the pods of this ${kind.singular.toLowerCase()}`
+      });
+    }
+    // Node maintenance. Only the one of Cordon and Uncordon that would change
+    // something is offered; Drain cordons on its own, so it is there either way.
+    if (kind.id === 'nodes') {
+      const node = (action) => () => post({ type: 'nodeAction', action, names: [row.name] });
+      actions.push(row.unschedulable
+        ? { label: 'Uncordon', run: node('uncordon'), title: 'Let new pods be scheduled on this node again' }
+        : { label: 'Cordon', run: node('cordon'), title: 'Stop new pods being scheduled on this node' });
+      actions.push({
+        label: 'Drain…',
+        run: node('drain'),
+        title: 'Cordon the node and evict its pods, in a terminal'
       });
     }
     // Only the kinds with a spec.replicas the scale subresource can write; see

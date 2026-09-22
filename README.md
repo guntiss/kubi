@@ -65,6 +65,9 @@ agent with the whole thing in view.
   Logs, Shell, Pods, Scale, Delete. Scale is offered on Deployments, StatefulSets
   and ReplicaSets, starting from the replica count currently set; scaling to zero
   confirms first.
+  Nodes add Cordon or Uncordon, and Drain, which confirms and then runs in a
+  terminal. The same actions are on a row's right-click menu; with several rows
+  ticked, the menu offers the bulk actions instead.
 
   The **Events** section lists everything the cluster recorded about the selected
   object, newest first. For a container that has restarted, **previous logs**
@@ -184,9 +187,9 @@ and `npm run package` then fails.
 
 ## Status
 
-Early but usable: read-mostly across the standard resource types. Delete, scale
-and `kubectl edit` are the only mutating actions; delete always confirms first,
-as does a scale to zero.
+Early but usable: read-mostly across the standard resource types. Delete, scale,
+cordon, drain and `kubectl edit` are the only mutating actions; delete and drain
+always confirm first, as does a scale to zero.
 
 Expect rough edges, and please
 [open an issue](https://github.com/guntiss/kubi/issues) when you find one —

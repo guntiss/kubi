@@ -467,6 +467,15 @@ export function removeMany(
 }
 
 /**
+ * Marks nodes unschedulable, or schedulable again. Both are a single field
+ * flip on each node and take any number of names, so a bulk cordon is one
+ * process however many rows are ticked.
+ */
+export function cordon(names: string[], context: string, schedulable = false): Promise<string> {
+  return run([schedulable ? 'uncordon' : 'cordon', ...names], context, 60000);
+}
+
+/**
  * Opens `kubectl edit` with VS Code itself as the editor. `code --wait` blocks
  * until the tab closes, which is what lets kubectl apply the result, so this
  * call stays pending for as long as the user has the file open — hence no

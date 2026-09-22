@@ -73,6 +73,8 @@ export interface Row {
    * which is display text ("3/5") and rounds a missing spec to 0.
    */
   replicas?: number;
+  /** Nodes only: `spec.unschedulable`, so the menu can offer Cordon or Uncordon. */
+  unschedulable?: boolean;
   /**
    * The controller that created this object; see `ownerOf`. Carried on every
    * kind that has one so a row can be matched to its owner without another
@@ -546,6 +548,7 @@ export function toRow(kindId: string, object: k.KubeObject): Row {
     search: Object.values(cells).join(' ').toLowerCase(),
     ...(built.containers ? { containers: built.containers } : {}),
     ...(built.replicas !== undefined ? { replicas: built.replicas } : {}),
+    ...(built.unschedulable ? { unschedulable: true } : {}),
     ...(owner ? { owner } : {}),
     ...(object.metadata.uid ? { uid: object.metadata.uid } : {})
   };
@@ -571,6 +574,7 @@ interface Built {
   created?: string;
   containers?: ContainerInfo[];
   replicas?: number;
+  unschedulable?: boolean;
 }
 
 function build(kindId: string, object: k.KubeObject): Built {
@@ -776,7 +780,8 @@ function buildNode(node: k.KubeObject): Built {
   const conditions: any[] = node.status?.conditions ?? [];
   const isReady = conditions.find((c) => c.type === 'Ready')?.status === 'True';
   const unschedulable = Boolean(node.spec?.unschedulable);
-  const status = isReady ? (unschedulable ? 'Ready,SchedulingDisabled' : 'Ready') : 'NotReady';
+  // Worded as kubectl words it: a cordon is shown whatever the readiness.
+  const status = (isReady ? 'Ready' : 'NotReady') + (unschedulable ? ',SchedulingDisabled' : '');
 
   const roles = Object.keys(node.metadata.labels ?? {})
     .filter((l) => l.startsWith('node-role.kubernetes.io/'))
@@ -787,6 +792,7 @@ function buildNode(node: k.KubeObject): Built {
   return {
     health: isReady ? (unschedulable ? 'warn' : 'ok') : 'bad',
     status,
+    unschedulable,
     cells: {
       status,
       roles: roles.join(',') || '<none>',

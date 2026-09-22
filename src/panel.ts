@@ -50,6 +50,8 @@ type Inbound =
       replicas?: number;
     }
   | { type: 'deleteMany'; kind: string; targets: { name: string; namespace?: string }[] }
+  /** Cordon, uncordon or drain: node maintenance, for one node or a ticked set. */
+  | { type: 'nodeAction'; action: 'cordon' | 'uncordon' | 'drain'; names: string[] }
   | {
       type: 'scaleMany';
       kind: string;
@@ -532,6 +534,9 @@ export class DashboardPanel {
         break;
       case 'deleteMany':
         await this.deleteMany(message);
+        break;
+      case 'nodeAction':
+        await this.nodeAction(message);
         break;
       case 'scaleMany':
         await this.scaleMany(message);
@@ -1350,6 +1355,46 @@ export class DashboardPanel {
   }
 
   /**
+   * Node maintenance on one node or several.
+   *
+   * Cordon and uncordon only flip `spec.unschedulable`, are undone by each
+   * other, and run without asking. Drain evicts every pod on the node and can
+   * sit for minutes on a PodDisruptionBudget, so it is confirmed first and run
+   * in a terminal, where its progress is visible and Ctrl+C stops it.
+   */
+  private async nodeAction(message: Extract<Inbound, { type: 'nodeAction' }>): Promise<void> {
+    const { action, names } = message;
+    if (!names.length) {
+      return;
+    }
+    const ctx = this.contextName;
+    const noun = names.length === 1 ? `node "${names[0]}"` : `${names.length} nodes`;
+    try {
+      if (action === 'drain') {
+        const list = names.length > 1 ? `${[...names].sort().join('\n')}\n\n` : '';
+        const confirmed = await vscode.window.showWarningMessage(
+          `Drain ${noun} in context "${ctx}"?`,
+          {
+            modal: true,
+            detail: `${list}The node is cordoned and every pod on it is evicted. DaemonSet pods `
+              + 'are left in place, and data in emptyDir volumes is lost.'
+          },
+          'Drain'
+        );
+        if (confirmed === 'Drain') {
+          openDrain(names, ctx);
+        }
+        return;
+      }
+      await k.cordon(names, ctx, action === 'uncordon');
+      vscode.window.showInformationMessage(`Kubi: ${action === 'cordon' ? 'cordoned' : 'uncordoned'} ${noun}`);
+      await this.load(this.activeKind);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Kubi: ${describeError(err)}`);
+    }
+  }
+
+  /**
    * Deletes a checked set of rows. One confirmation covers the whole set — a
    * prompt per object would train people to click through them — and it names
    * what is about to go, because a count alone is not something anyone can
@@ -1693,6 +1738,28 @@ function openLogs(name: string, context: string, namespace: string, container?: 
   ];
   const terminal = vscode.window.createTerminal({
     name: `${previous ? 'previous logs' : 'logs'} ${label(name, container)} (${context})`,
+    env: terminalEnv()
+  });
+  terminal.sendText(`${kubectl} ${args.map(quote).join(' ')}`);
+  terminal.show();
+}
+
+/**
+ * Drains nodes in a terminal. `--ignore-daemonsets` because a DaemonSet pod
+ * is recreated on the node straight away, so kubectl otherwise refuses almost
+ * every real node; `--delete-emptydir-data` because scratch volumes are what
+ * emptyDir is for, and refusing on them stops most drains for no benefit. The
+ * confirmation says both.
+ */
+function openDrain(names: string[], context: string): void {
+  const kubectl = vscode.workspace.getConfiguration('kubi').get<string>('kubectlPath') || 'kubectl';
+  const args = [
+    ...kubeconfigArgs(),
+    '--context', context, 'drain', ...names,
+    '--ignore-daemonsets', '--delete-emptydir-data'
+  ];
+  const terminal = vscode.window.createTerminal({
+    name: `drain ${names.length === 1 ? names[0] : `${names.length} nodes`} (${context})`,
     env: terminalEnv()
   });
   terminal.sendText(`${kubectl} ${args.map(quote).join(' ')}`);
