@@ -731,7 +731,6 @@ input.row-check:focus-visible { outline: 1px solid var(--vscode-focusBorder); ou
 }
 
 td.numeric, th.numeric { text-align: right; font-variant-numeric: tabular-nums; }
-td.name { font-weight: 500; }
 
 .pill {
   display: inline-flex;
