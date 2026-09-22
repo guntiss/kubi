@@ -2918,8 +2918,29 @@
     closeRowMenu();
     const kind = kindOf(state.active);
     const run = (fn) => () => { closeRowMenu(); fn(); };
+    // A pod's logs and shell are what it is most often right-clicked for, so
+    // the main container's pair sits at the top. The main container is the
+    // first ordinary one: init containers have usually finished, and
+    // ephemeral ones are debugging sidecars. Other containers are one click
+    // away in the detail panel.
+    const main = kind.id === 'pods' && (row.containers || []).find((c) => c.kind === 'app');
+    const act = (action) => () => post(actionMessage(kind, row, action, main.name));
+    const running = main && main.state === 'Running';
     const items = [
       { label: 'Describe', run: () => { selectRow(row); openDetailTab('describe'); }, title: 'kubectl describe, in the detail panel' },
+      ...(main ? [
+        {
+          label: `Logs (${main.name})`,
+          run: act('logs'),
+          title: `kubectl logs -f --tail 100 -c ${main.name}, in a terminal`
+        },
+        {
+          label: `Shell (${main.name})`,
+          run: act('shell'),
+          disabled: !running,
+          title: running ? `kubectl exec -c ${main.name}` : 'Only a running container can be shelled into'
+        }
+      ] : []),
       null,
       ...objectActions(kind, row)
     ];
