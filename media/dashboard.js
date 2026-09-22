@@ -2394,86 +2394,6 @@
   const FLASH_MS = 1400;
 
   /**
-   * How long a departing row stays on screen while it fades. Must match
-   * `row-leave`'s duration in the stylesheet.
-   *
-   * Longer than a flash on purpose. A flash marks something you can still go
-   * and look at, so it only has to catch the eye; this is the last sight of a
-   * row, and once it is gone the only way to find out what it said is to go
-   * looking through events. Still well inside the 10s fetch, so a row that
-   * leaves on one refresh is gone before the next one lands.
-   */
-  const LEAVE_MS = 2200;
-
-  /**
-   * Fades a row out and removes it, instead of dropping it from the table
-   * between one frame and the next.
-   *
-   * A deleted object otherwise vanishes with no trace of having been there:
-   * at a 10s refresh the row is simply absent, and the rows below jump up to
-   * close the gap. Neither says which row went, so a pod that was deleted and
-   * one that was never noticed look identical.
-   *
-   * The node is made inert before it fades. It is still in the table for the
-   * length of the animation, and until it goes it would answer clicks through
-   * the handlers bound in `buildRow` — which close over an object the cluster
-   * no longer reports, so a click would open details for something that isn't
-   * there. Its `data-key` goes too: the reconciler indexes the tbody by that
-   * attribute, and a corpse left addressable would be picked up as the node to
-   * reuse if the same name came back, resurrecting a row mid-fade.
-   *
-   * Each cell's contents are moved into a wrapper on the way out, because a
-   * `tr` cannot be collapsed directly: table layout derives a row's height
-   * from its cells and ignores a height set on the row itself. Animating the
-   * cells' own padding was the first attempt and it had to take the text down
-   * with it — type shrinking mid-table read as a rendering fault rather than
-   * as a deletion. A wrapper is a block box like any other, so its height
-   * animates normally while the text inside it stays at full size and is
-   * simply clipped.
-   *
-   * Built here rather than in `buildRow` so the table carries no extra element
-   * per cell in the common case: this runs once for a row that is leaving,
-   * while `buildRow` runs for every row of every refresh.
-   */
-  const leaveTimers = new WeakMap();
-
-  function leaveRow(tr) {
-    // Already on its way out — a second sweep must not restart the fade or
-    // schedule a second removal for the same node.
-    if (leaveTimers.has(tr)) return;
-    // Nothing downstream should find it: not the reconciler's key index, not
-    // the cursor's `scrollIntoView` lookup, not a click.
-    tr.removeAttribute('data-key');
-    tr.classList.remove('cursor');
-
-    // The wrapper takes the cell's own height as an explicit starting point.
-    // `height: auto` is not a value an animation can interpolate from, so the
-    // collapse would jump straight to zero without it; it is measured before
-    // anything is moved, while the row is still laid out normally.
-    for (const td of tr.children) {
-      const box = document.createElement('div');
-      box.className = 'leave-box';
-      // Read by `row-leave-collapse` as the height to close from; see the
-      // stylesheet. A custom property rather than `height` itself, so the
-      // animation owns the property outright and there is no inline value
-      // fighting it for the last frame.
-      box.style.setProperty('--leave-height', td.clientHeight + 'px');
-      while (td.firstChild) box.appendChild(td.firstChild);
-      td.appendChild(box);
-    }
-
-    tr.classList.add('leaving');
-    // `inert` takes the subtree out of hit-testing, focus and the accessibility
-    // tree in one go, so the checkbox inside it can't be tabbed to either.
-    tr.inert = true;
-    const timer = setTimeout(() => {
-      leaveTimers.delete(tr);
-      tr.remove();
-    }, LEAVE_MS);
-    leaveTimers.set(tr, timer);
-  }
-
-  /**
    * The columns a table was drawn with, as a string cheap enough to compare on
    * every repaint. The namespace column comes and goes with the picker, so the
    * count alone would not catch a change that keeps the number the same.
@@ -2521,43 +2441,18 @@
       if (key !== null) existing.set(key, tr);
     }
 
-    // Marked before anything is placed, not swept up at the end. The placement
-    // pass moves survivors into their new order, and a row still indexed as
-    // live at that point gets relocated along with them — a row deleted from
-    // the middle ended up shunted to the bottom of the table and fading there,
-    // while the gap it left closed instantly. Retiring it first takes it out of
-    // `existing`, so the pass treats its position as fixed and it fades where
-    // the eye last saw it.
-    //
-    // Only a fetch-driven paint fades. `flashChangedRows` marks those; a row
-    // the user filtered away should go the moment they type, not linger for
-    // two seconds arguing with the filter they just set.
+    // Rows the refresh no longer reports are dropped before anything is
+    // placed, so the placement pass below only ever walks live rows.
     const wanted = new Set(rows.map(rowKey));
     for (const [key, tr] of existing) {
       if (wanted.has(key)) continue;
       existing.delete(key);
-      if (flashChangedRows) leaveRow(tr); else tr.remove();
+      tr.remove();
     }
-
-    /**
-     * The next node the cursor can sit on, stepping over rows that are fading
-     * out. Those are no longer part of the order being built — they hold a
-     * position only until their timer fires — so a live row must never be
-     * placed relative to one. Left in the walk, the cursor could come to rest
-     * on a corpse and every following `insertBefore` would thread live rows in
-     * behind it, drifting the table out of sorted order for as long as the
-     * fade lasts.
-     */
-    const nextLive = (node) => {
-      while (node && node.nodeType === 1 && node.classList.contains('leaving')) {
-        node = node.nextSibling;
-      }
-      return node;
-    };
 
     // Built in order, then applied against the DOM in the same order, so a row
     // that moved is relocated rather than rebuilt.
-    let cursor = nextLive(tbody.firstChild);
+    let cursor = tbody.firstChild;
     rows.forEach((row, index) => {
       const key = rowKey(row);
       const found = existing.get(key);
@@ -2579,17 +2474,16 @@
         existing.delete(key);
         // A node we couldn't update is replaced rather than reused, so it has
         // to go: it would otherwise sit in the table as a duplicate of the row
-        // that displaced it. Removed outright rather than faded — the object
-        // is still there, this is just the node that stopped fitting it.
+        // that displaced it.
         if (!reused) {
           // It may be the very node the cursor is resting on, and removing the
           // cursor would strand the rest of the pass after a detached node.
-          if (cursor === found) cursor = nextLive(found.nextSibling);
+          if (cursor === found) cursor = found.nextSibling;
           found.remove();
         }
       }
       if (cursor === tr) {
-        cursor = nextLive(tr.nextSibling);
+        cursor = tr.nextSibling;
       } else {
         tbody.insertBefore(tr, cursor);
       }
@@ -3940,13 +3834,6 @@
   setInterval(() => {
     if (document.hidden) return;
     for (const cell of app.querySelectorAll('[data-age-from]')) {
-      // A row on its way out is skipped. Its cells' contents have been moved
-      // into a collapsing wrapper, and the `textContent` write below would
-      // replace that wrapper with a bare text node — stopping the collapse
-      // halfway and snapping the row back to full height. The age it shows is
-      // a snapshot of an object the cluster no longer reports, so there is
-      // nothing to count up anyway.
-      if (cell.parentElement && cell.parentElement.classList.contains('leaving')) continue;
       // A table cell reads "5m"; a detail line reads "5m ago". The suffix rides
       // along on the element so the ticker doesn't have to know which is which.
       const next = formatAge(cell.getAttribute('data-age-from'))
