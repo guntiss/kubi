@@ -1126,29 +1126,74 @@
     }
 
     children.push(renderFreshness());
-    children.push(el('button', {
-      class: 'refresh',
-      onclick: () => select(state.active),
-      title: state.busy ? 'Refreshing…' : 'Refresh',
-      // A fetch is already in flight; a second click would only queue work the
-      // spinner is already reporting.
-      disabled: state.busy
-    }, '⟳ Refresh'));
+    children.push(renderRefresh());
     // The filter row below draws its own separator, so the toolbar drops its
     // rule rather than stacking two lines a few pixels apart.
     return el('div', { class: 'toolbar' + (showFilters() ? ' with-filters' : '') }, ...children);
   }
 
   /**
-   * The one spot that reports refresh state: a small spinner while a fetch is
-   * in flight, otherwise how old the content on screen is. Sitting in the
-   * toolbar keeps it out of the way of the content it describes.
+   * The refresh control, which is also where a fetch in flight is reported: the
+   * button is disabled for the whole of one anyway, so rather than dimming a
+   * control nobody can press, the spinner takes its place. Both are laid out on
+   * the same fixed square, so the toolbar doesn't shift as they swap.
+   */
+  function renderRefresh() {
+    if (state.busy) {
+      return el('span', { class: 'refresh-slot busy', title: 'Refreshing…' },
+        el('span', { class: 'spinner' })
+      );
+    }
+    return el('button', {
+      class: 'refresh-slot refresh',
+      onclick: () => select(state.active),
+      title: 'Refresh',
+      'aria-label': 'Refresh'
+    }, refreshMark());
+  }
+
+  /**
+   * The refresh arrow, drawn rather than typed. `⟳` renders at whatever size
+   * and weight the theme's font gives it — small inside its em box, and not the
+   * same small on every platform — which left the button mostly padding. A path
+   * in `currentColor` fills the square the slot reserves and is sized in CSS,
+   * the way the brand mark is.
+   */
+  function refreshMark() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'refresh-mark');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    // An open circle with the gap at the top right, closed by an arrowhead —
+    // the standard reload glyph, at a stroke weight that matches the rail's.
+    const arc = document.createElementNS(ns, 'path');
+    arc.setAttribute('d', 'M13.4 8a5.4 5.4 0 1 1-1.9-4.1');
+    arc.setAttribute('fill', 'none');
+    arc.setAttribute('stroke', 'currentColor');
+    arc.setAttribute('stroke-width', '1.6');
+    arc.setAttribute('stroke-linecap', 'round');
+    const head = document.createElementNS(ns, 'path');
+    head.setAttribute('d', 'M13.6 1.3v3.2h-3.2');
+    head.setAttribute('fill', 'none');
+    head.setAttribute('stroke', 'currentColor');
+    head.setAttribute('stroke-width', '1.6');
+    head.setAttribute('stroke-linecap', 'round');
+    head.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(arc);
+    svg.appendChild(head);
+    return svg;
+  }
+
+  /**
+   * How old the content on screen is. Sitting in the toolbar keeps it out of
+   * the way of the content it describes. The spinner that used to sit beside it
+   * now stands in for the refresh button; see `renderRefresh`.
    */
   function renderFreshness() {
     if (state.busy) {
       return el('span', { class: 'freshness busy', title: 'Refreshing…' },
-        el('span', { class: 'spinner' }),
-        state.generated ? `cached ${ago(state.generated)}` : 'Loading…'
+        state.generated ? ago(state.generated) : 'Loading…'
       );
     }
     if (state.empty || state.error || !state.generated) {
@@ -1157,13 +1202,13 @@
     return el('span', {
       class: 'freshness' + (state.stale ? ' stale' : ''),
       title: new Date(state.generated).toLocaleString(),
-      text: state.stale ? `cached ${ago(state.generated)}` : `updated ${ago(state.generated)}`
+      text: ago(state.generated)
     });
   }
 
   /**
    * Swaps the freshness label in place, so a refresh doesn't rebuild the view.
-   * The refresh button tracks the same busy flag, so it is updated in step
+   * The refresh control tracks the same busy flag, so it is swapped in step
    * rather than waiting for the next full render.
    */
   function renderFreshnessOnly() {
@@ -1174,11 +1219,8 @@
       render();
       return;
     }
-    const button = app.querySelector('.toolbar button.refresh');
-    if (button) {
-      button.disabled = state.busy;
-      button.title = state.busy ? 'Refreshing…' : 'Refresh';
-    }
+    const slot = app.querySelector('.toolbar .refresh-slot');
+    if (slot) slot.replaceWith(renderRefresh());
   }
 
   /** Enables or disables the clear button in place, for the same focus reason. */

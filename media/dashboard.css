@@ -241,16 +241,41 @@ button.brand:hover .mark { color: var(--vscode-foreground); }
 .toolbar.with-filters { border-bottom: none; padding-bottom: 4px; }
 
 /*
- * Disabled only while a fetch is in flight, which the spinner beside it is
- * already reporting — so it dims rather than changing shape, and drops the
- * hover that would invite a click that does nothing.
+ * The refresh control and the spinner that stands in for it while a fetch is in
+ * flight occupy one fixed square, so the toolbar doesn't shift as they swap.
+ * The icon carries the button on its own: a label would only repeat the tooltip
+ * at the cost of the width.
  */
-.toolbar button.refresh:disabled {
-  opacity: 0.4;
-  cursor: default;
+.toolbar .refresh-slot {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  line-height: 1;
 }
-.toolbar button.refresh:disabled:hover {
-  background: var(--vscode-button-secondaryBackground, transparent);
+.toolbar .refresh-slot.busy {
+  /* The spinner is a bare mark in the button's place, not a pressable surface. */
+  border: none;
+  background: none;
+}
+
+/*
+ * Sized against the slot rather than the font, so the arrow fills the button
+ * instead of floating in the middle of it at whatever size the theme's `⟳`
+ * happened to be. The spinner it swaps with is the same 14px across, so the two
+ * states carry the same weight.
+ */
+.refresh-mark {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.toolbar .refresh-slot.busy .spinner {
+  width: 14px;
+  height: 14px;
 }
 
 /*
@@ -406,8 +431,8 @@ select.status-picker { max-width: 230px; }
  * rather than vanishing, so the toolbar reads the same either way.
  */
 button.clear-filters { flex: none; }
-/* Dimmed the same way the refresh button is, and without the hover that would
- * invite a click that does nothing. */
+/* Dimmed, and without the hover that would invite a click that does
+ * nothing. */
 button.clear-filters:disabled {
   opacity: 0.4;
   cursor: default;
