@@ -2246,6 +2246,13 @@
    * from the row itself rather than from a cell: `health` colours the row and
    * the status pill, and `created` is what the age ticker counts from.
    *
+   * Age cells are skipped. Their text on screen is never the string in `cells`
+   * — `cellValue` recomputes it from `created`, and the ticker rewrites it
+   * every second — but the fetched string is a fresh measurement each time, so
+   * comparing it reported every row as changed as soon as its age rolled over
+   * a unit, which on a young object is every fetch. `created` is compared
+   * above, and that is the only thing about an age that can actually move.
+   *
    * Only ever used to skip work, so it is deliberately conservative: an added
    * or removed key, or anything it doesn't know to compare, reads as different
    * and the cells are examined one by one as before.
@@ -2259,6 +2266,7 @@
     const keys = Object.keys(after);
     if (keys.length !== Object.keys(before).length) return false;
     for (const key of keys) {
+      if (isAgeColumn(key)) continue;
       if (before[key] !== after[key]) return false;
     }
     return true;
