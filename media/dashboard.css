@@ -538,6 +538,31 @@ tbody tr.warn { background: rgba(224, 138, 30, 0.13); }
 tbody tr.warn:hover { background: rgba(224, 138, 30, 0.22); }
 
 /*
+ * And it pulses, since a pending row is one that is expected to change: the
+ * motion says "still in progress" where a steady wash could be a settled
+ * state. The hover shade gets its own keyframes, because a running animation
+ * outranks the plain `:hover` rule and would otherwise swallow it.
+ *
+ * `--pulse-delay` is set by the script to a negative offset into the cycle,
+ * taken from one clock, so a row built by a refresh joins the rows already on
+ * screen in step instead of starting its own pulse out of phase with them.
+ */
+@keyframes warn-pulse {
+  0%, 100% { background-color: rgba(224, 138, 30, 0.10); }
+  50% { background-color: rgba(224, 138, 30, 0.30); }
+}
+@keyframes warn-pulse-hover {
+  0%, 100% { background-color: rgba(224, 138, 30, 0.20); }
+  50% { background-color: rgba(224, 138, 30, 0.38); }
+}
+tbody tr.warn { animation: warn-pulse 2.4s ease-in-out var(--pulse-delay, 0s) infinite; }
+tbody tr.warn:hover { animation-name: warn-pulse-hover; }
+
+@media (prefers-reduced-motion: reduce) {
+  tbody tr.warn { animation: none; }
+}
+
+/*
  * A ticked row gets no fill of its own: the ticked box already says it is in
  * the set, and a tint would hide the health wash of a failing or pending row.
  */
@@ -567,6 +592,7 @@ tbody tr.selected.warn, tbody tr.selected.warn:hover,
 tbody tr.selected.checked, tbody tr.selected.checked:hover {
   background: var(--vscode-list-activeSelectionBackground);
   color: var(--vscode-list-activeSelectionForeground);
+  animation: none;
 }
 
 /*

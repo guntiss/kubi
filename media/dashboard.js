@@ -495,7 +495,20 @@
 
   // ---------- rendering ----------
 
+  /** One cycle of the pending rows' pulse; matches `warn-pulse` in the CSS. */
+  const PULSE_MS = 2400;
+
+  /**
+   * Points `--pulse-delay` at where the pulse is right now, so any row that
+   * starts pulsing during this render starts at the same phase as the rows
+   * already on screen. See `warn-pulse` in the CSS.
+   */
+  function syncPulse() {
+    document.documentElement.style.setProperty('--pulse-delay', `-${Math.round(performance.now() % PULSE_MS)}ms`);
+  }
+
   function render() {
+    syncPulse();
     const content0 = app.querySelector('.content');
     const scroll = content0?.scrollTop ?? 0;
     // The table is wider than the pane whenever a kind has many columns, so the
@@ -1240,6 +1253,7 @@
   }
 
   function renderContentOnly() {
+    syncPulse();
     const old = app.querySelector('.content');
     if (!old) return render();
     // The common case by a wide margin: a refresh, a sort or a tick on a table
