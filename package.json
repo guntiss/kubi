@@ -67,11 +67,6 @@
         "command": "kubi.openContext",
         "title": "Kubi: Open Cluster",
         "icon": "$(link-external)"
-      },
-      {
-        "command": "kubi.setCurrentContext",
-        "title": "Kubi: Set as Current Context",
-        "icon": "$(check)"
       }
     ],
     "menus": {
@@ -87,20 +82,11 @@
           "command": "kubi.openContext",
           "when": "view == kubi.contexts && viewItem == k8scontext",
           "group": "inline@1"
-        },
-        {
-          "command": "kubi.setCurrentContext",
-          "when": "view == kubi.contexts && viewItem == k8scontext",
-          "group": "ctx@1"
         }
       ],
       "commandPalette": [
         {
           "command": "kubi.openContext",
-          "when": "false"
-        },
-        {
-          "command": "kubi.setCurrentContext",
           "when": "false"
         }
       ]

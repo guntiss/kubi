@@ -91,8 +91,7 @@ type=Warning` being unsupported on some versions is the reason a filter is
 applied locally, and the code says so. Skip comments that restate the line.
 
 **Never mutate the user's kubeconfig implicitly.** Every call passes `--context`
-explicitly. The only thing that changes the current context is the command that
-exists to do exactly that.
+explicitly, and nothing changes the current context.
 
 **Mutating actions confirm.** Delete always confirms; a scale to zero confirms,
 because it stops the workload. Every confirmation names the context it is about

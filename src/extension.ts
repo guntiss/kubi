@@ -73,18 +73,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
-  register('kubi.setCurrentContext', async (node?: TreeNode) => {
-    if (!isContextNode(node)) {
-      return;
-    }
-    try {
-      await k.run(['config', 'use-context', node.info.name]);
-      vscode.window.showInformationMessage(`Kubi: switched kubeconfig to "${node.info.name}".`);
-      tree.refresh();
-    } catch (err) {
-      vscode.window.showErrorMessage(`Kubi: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  });
 }
 
 export function deactivate(): void {
