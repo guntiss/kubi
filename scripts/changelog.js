@@ -213,7 +213,10 @@ function main() {
     const locked = setLockVersion(heading);
     console.error(`changelog: wrote "${heading}" to CHANGELOG.md, package.json${locked ? ' and package-lock.json' : ''} — edit the prose, then commit and tag:`);
     console.error(`  git commit -am "Release ${heading}"`);
-    console.error(`  git tag v${heading} && git push --follow-tags`);
+    // A plain `git tag` makes a lightweight tag, which --follow-tags skips,
+    // so the tag is pushed by name. This repo's tags are all lightweight.
+    console.error(`  git tag v${heading}`);
+    console.error(`  git push && git push origin v${heading}`);
     return;
   }
 
