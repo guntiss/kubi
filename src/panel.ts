@@ -48,8 +48,14 @@ type Inbound =
       container?: string;
       /** Scale only: the count the row was showing, used as the prompt's default. */
       replicas?: number;
+      /** Delete only: skip graceful termination. */
+      force?: boolean;
     }
-  | { type: 'deleteMany'; kind: string; targets: { name: string; namespace?: string }[] }
+  /**
+   * Deletes arrive already confirmed: the webview asks, since the native modal
+   * cannot carry the Force checkbox.
+   */
+  | { type: 'deleteMany'; kind: string; targets: { name: string; namespace?: string }[]; force?: boolean }
   /** Cordon, uncordon or drain: node maintenance, for one node or a ticked set. */
   | { type: 'nodeAction'; action: 'cordon' | 'uncordon' | 'drain'; names: string[] }
   | {
@@ -1264,19 +1270,7 @@ export class DashboardPanel {
         }
         case 'delete': {
           const label = namespace ? `${namespace}/${name}` : name;
-          const singular = (kindById(kind)?.singular ?? kind).toLowerCase();
-          const confirmed = await vscode.window.showWarningMessage(
-            `Delete ${singular} "${label}" in context "${ctx}"?`,
-            {
-              modal: true,
-              detail: 'This cannot be undone.'
-            },
-            'Delete'
-          );
-          if (confirmed !== 'Delete') {
-            return;
-          }
-          await k.remove(kind, name, ctx, namespace);
+          await k.remove(kind, name, ctx, namespace, message.force);
           vscode.window.showInformationMessage(`Kubi: deleted ${label}`);
           await this.load(this.activeKind);
           break;
@@ -1395,10 +1389,10 @@ export class DashboardPanel {
   }
 
   /**
-   * Deletes a checked set of rows. One confirmation covers the whole set — a
-   * prompt per object would train people to click through them — and it names
-   * what is about to go, because a count alone is not something anyone can
-   * check their intent against.
+   * Deletes a checked set of rows, already confirmed by the webview's dialog.
+   * One confirmation covers the whole set — a prompt per object would train
+   * people to click through them — and it names what is about to go, because a
+   * count alone is not something anyone can check their intent against.
    *
    * Objects are deleted a namespace at a time, so one kubectl call handles
    * each group, and a group that fails does not cancel the rest: a bulk delete
@@ -1406,7 +1400,7 @@ export class DashboardPanel {
    * failed is reported at the end.
    */
   private async deleteMany(message: Extract<Inbound, { type: 'deleteMany' }>): Promise<void> {
-    const { kind, targets } = message;
+    const { kind, targets, force } = message;
     if (!targets.length) {
       return;
     }
@@ -1415,24 +1409,6 @@ export class DashboardPanel {
     const noun = targets.length === 1
       ? (meta?.singular ?? kind).toLowerCase()
       : (meta?.label ?? kind).toLowerCase();
-
-    // Enough names to recognise the set, then a count for the rest, so the
-    // dialog stays a readable size even for a hundred rows.
-    const labels = targets.map((t) => (t.namespace ? `${t.namespace}/${t.name}` : t.name)).sort();
-    const shown = labels.slice(0, 10);
-    const rest = labels.length - shown.length;
-    const list = shown.join('\n') + (rest > 0 ? `\n…and ${rest} more` : '');
-    const confirmed = await vscode.window.showWarningMessage(
-      `Delete ${targets.length} ${noun} in context "${ctx}"?`,
-      {
-        modal: true,
-        detail: `${list}\n\nThis cannot be undone.`
-      },
-      `Delete ${targets.length}`
-    );
-    if (confirmed !== `Delete ${targets.length}`) {
-      return;
-    }
 
     const groups = new Map<string, { namespace?: string; names: string[] }>();
     for (const target of targets) {
@@ -1449,7 +1425,7 @@ export class DashboardPanel {
       async () => {
         for (const group of groups.values()) {
           try {
-            await k.removeMany(kind, group.names, ctx, group.namespace);
+            await k.removeMany(kind, group.names, ctx, group.namespace, force);
             deleted += group.names.length;
           } catch (err) {
             failures.push(`${group.namespace ? `${group.namespace}: ` : ''}${describeError(err)}`);

@@ -1088,6 +1088,59 @@ tr.selected .pill { background: rgba(255,255,255,0.18); }
   opacity: 0.5; cursor: default;
 }
 
+/* ---------- delete confirmation ---------- */
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.confirm {
+  width: min(440px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.confirm h2 { margin: 0; font-size: 1.05em; }
+.confirm .context { color: var(--muted); font-size: 0.9em; margin-top: -6px; }
+.confirm .targets {
+  margin: 0;
+  padding: 8px 10px;
+  list-style: none;
+  overflow-y: auto;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.9em;
+  word-break: break-all;
+  user-select: text;
+}
+.confirm .targets .more { color: var(--muted); }
+.confirm .force { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.confirm .force input { margin: 2px 0 0; }
+.confirm .force .hint { display: block; color: var(--muted); font-size: 0.85em; }
+.confirm .note { color: var(--muted); font-size: 0.9em; }
+.confirm .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.confirm button.danger.solid {
+  background: var(--bad);
+  color: #fff;
+  border-color: transparent;
+}
+.confirm button.danger.solid:hover { filter: brightness(1.1); }
+
 /* ---------- states ---------- */
 
 .state { padding: 40px 20px; text-align: center; color: var(--muted); }

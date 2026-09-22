@@ -413,8 +413,22 @@ function runWithStdin(args: string[], input: string, timeoutMs = 30000): Promise
   });
 }
 
-export function remove(resource: string, name: string, context: string, namespace?: string): Promise<string> {
-  return run(['delete', resource, name, ...scopeArgs(namespace)], context, 60000);
+/**
+ * `--force --grace-period=0` removes the object from the API server at once,
+ * without waiting for its pods to confirm they have stopped.
+ */
+function forceArgs(force?: boolean): string[] {
+  return force ? ['--force', '--grace-period=0'] : [];
+}
+
+export function remove(
+  resource: string,
+  name: string,
+  context: string,
+  namespace?: string,
+  force?: boolean
+): Promise<string> {
+  return run(['delete', resource, name, ...forceArgs(force), ...scopeArgs(namespace)], context, 60000);
 }
 
 /**
@@ -460,10 +474,11 @@ export function removeMany(
   resource: string,
   names: string[],
   context: string,
-  namespace?: string
+  namespace?: string,
+  force?: boolean
 ): Promise<string> {
   const timeout = Math.min(10 * 60000, 60000 + names.length * 5000);
-  return run(['delete', resource, ...names, ...scopeArgs(namespace)], context, timeout);
+  return run(['delete', resource, ...names, ...forceArgs(force), ...scopeArgs(namespace)], context, timeout);
 }
 
 /**

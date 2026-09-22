@@ -2689,13 +2689,110 @@
       key: 'd',
       label: (rows) => `Delete ${rows.length}`,
       title: (rows, noun) => `Delete the ${rows.length} selected ${noun}`,
-      run: (rows) => post({
-        type: 'deleteMany',
-        kind: state.active,
-        targets: rows.map((row) => ({ name: row.name, namespace: row.namespace }))
-      })
+      run: (rows) => {
+        const kind = kindOf(state.active);
+        const noun = rows.length === 1
+          ? (kind ? kind.singular.toLowerCase() : 'item')
+          : (kind ? kind.label.toLowerCase() : 'items');
+        confirmDelete({
+          heading: `Delete ${rows.length} ${noun}?`,
+          labels: rows.map((row) => (row.namespace ? `${row.namespace}/${row.name}` : row.name)),
+          confirmLabel: `Delete ${rows.length}`,
+          onConfirm: (force) => post({
+            type: 'deleteMany',
+            kind: state.active,
+            targets: rows.map((row) => ({ name: row.name, namespace: row.namespace })),
+            force
+          })
+        });
+      }
     }
   ];
+
+  /** The delete confirmation on screen, if any. */
+  let deleteDialog = null;
+
+  /**
+   * Asks before a delete, in the webview rather than through the extension's
+   * native modal, because the native one can carry only buttons and this needs
+   * a Force checkbox. Force is off every time the dialog opens: it skips
+   * graceful termination, and a setting that remembered itself would carry
+   * that into the next delete unnoticed.
+   *
+   * The dialog lives on the body, outside `#app`, so a refresh that rebuilds
+   * the dashboard underneath it does not take it away mid-decision.
+   */
+  function confirmDelete({ heading, labels, confirmLabel, onConfirm }) {
+    closeDeleteDialog();
+    // Enough names to recognise the set, then a count for the rest, so the
+    // dialog stays a readable size even for a hundred rows.
+    const sorted = [...labels].sort();
+    const shown = sorted.slice(0, 10);
+    const rest = sorted.length - shown.length;
+
+    const force = el('input', { type: 'checkbox', id: 'delete-force' });
+    const confirm = () => {
+      const forced = force.checked;
+      closeDeleteDialog();
+      onConfirm(forced);
+    };
+    const cancel = el('button', { onclick: closeDeleteDialog }, 'Cancel');
+
+    deleteDialog = el('div', {
+      class: 'confirm-backdrop',
+      onmousedown: (e) => { if (e.target === e.currentTarget) closeDeleteDialog(); }
+    },
+      el('div', {
+        class: 'confirm', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': heading,
+        onkeydown: (e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            closeDeleteDialog();
+          } else if (e.key === 'Tab') {
+            // Keeps focus inside the dialog, which is modal to the page.
+            const stops = [...deleteDialog.querySelectorAll('input, button')];
+            const at = stops.indexOf(document.activeElement);
+            const next = (at + (e.shiftKey ? -1 : 1) + stops.length) % stops.length;
+            e.preventDefault();
+            stops[next].focus();
+          }
+          // Nothing typed here is meant for the table behind.
+          e.stopPropagation();
+        }
+      },
+        el('h2', { text: heading }),
+        el('div', { class: 'context', text: `Context "${state.context}"` }),
+        el('ul', { class: 'targets' },
+          ...shown.map((label) => el('li', { text: label })),
+          rest > 0 ? el('li', { class: 'more', text: `…and ${rest} more` }) : null
+        ),
+        el('label', { class: 'force', for: 'delete-force' },
+          force,
+          el('span', {},
+            'Force',
+            el('span', {
+              class: 'hint',
+              text: 'Skip graceful termination (--force --grace-period=0)'
+            })
+          )
+        ),
+        el('div', { class: 'note', text: 'This cannot be undone.' }),
+        el('div', { class: 'buttons' },
+          cancel,
+          el('button', { class: 'danger solid', onclick: confirm }, confirmLabel)
+        )
+      )
+    );
+    document.body.appendChild(deleteDialog);
+    // Cancel takes focus, so a stray Enter backs out rather than deletes.
+    cancel.focus();
+  }
+
+  function closeDeleteDialog() {
+    if (!deleteDialog) return;
+    deleteDialog.remove();
+    deleteDialog = null;
+  }
 
   /**
    * The action bar along the bottom of a table view: the home for bulk actions
@@ -2821,7 +2918,16 @@
       const at = row.replicas !== undefined ? ` (currently ${row.replicas})` : '';
       actions.push({ label: 'Scale…', run: act('scale'), title: `Set the replica count${at}` });
     }
-    actions.push({ label: 'Delete', variant: 'danger', run: act('delete') });
+    actions.push({
+      label: 'Delete',
+      variant: 'danger',
+      run: () => confirmDelete({
+        heading: `Delete ${kind.singular.toLowerCase()}?`,
+        labels: [row.namespace ? `${row.namespace}/${row.name}` : row.name],
+        confirmLabel: 'Delete',
+        onConfirm: (force) => post({ ...actionMessage(kind, row, 'delete'), force })
+      })
+    });
     return actions;
   }
 
@@ -3690,6 +3796,10 @@
   }
 
   document.addEventListener('keydown', (e) => {
+    // The delete dialog handles its own keys; one that arrives here came from
+    // outside it, and nothing behind a modal should react.
+    if (deleteDialog) return;
+
     // An open context menu has the keyboard to itself.
     if (rowMenu) {
       if (e.key === 'Escape' || e.key === 'Tab') {
@@ -3752,7 +3862,7 @@
     // Ctrl/Cmd shortcuts for the bulk actions, on the same terms as their
     // buttons: a table view, with rows ticked. They run the action's own `run`,
     // so the shortcut and the button cannot diverge — and every destructive one
-    // confirms in the extension before anything is touched.
+    // confirms before anything is touched.
     if ((e.ctrlKey || e.metaKey) && !e.altKey && isTable() && !state.selected
         && !typingInField(e.target)) {
       const action = bulkActionsFor(kindOf(state.active))
