@@ -586,7 +586,7 @@ tbody tr.selected.checked, tbody tr.selected.checked:hover {
  * long, nearly invisible tail, which is seen as the tint disappearing at once.
  *
  * `forwards` matters as much as the fade itself. The script takes the class off
- * on its own timer, nominally at the same 2.6s, but a `setTimeout` always lands
+ * on its own timer, nominally at the same 1.4s, but a `setTimeout` always lands
  * a little after the animation ends — and with the default `fill-mode: none`
  * the layer reverts to its unanimated `opacity: 1` the instant the animation
  * finishes. The tint snapped back to full strength for that gap and was then
@@ -604,7 +604,7 @@ tbody tr.flash > td::after, tbody tr.flash-new > td::after {
   z-index: -1;
   pointer-events: none;
   background: var(--flash-tint);
-  animation: row-flash 2.6s linear forwards;
+  animation: row-flash 1.4s linear forwards;
 }
 
 /*

@@ -2312,7 +2312,7 @@
    * stylesheet: long enough to catch the eye on a table that is scanned rather
    * than read, short enough to be gone before the next 10s fetch.
    */
-  const FLASH_MS = 2600;
+  const FLASH_MS = 1400;
 
   /**
    * The columns a table was drawn with, as a string cheap enough to compare on
