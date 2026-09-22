@@ -538,16 +538,9 @@ tbody tr.warn { background: rgba(224, 138, 30, 0.13); }
 tbody tr.warn:hover { background: rgba(224, 138, 30, 0.22); }
 
 /*
- * A ticked row is tinted more quietly than an open one: it is a member of a
- * set, not the thing being looked at. The tint still beats the health wash, so
- * a ticked failing row reads as ticked.
+ * A ticked row gets no fill of its own: the ticked box already says it is in
+ * the set, and a tint would hide the health wash of a failing or pending row.
  */
-tbody tr.checked, tbody tr.checked.bad, tbody tr.checked.warn {
-  background: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.18));
-}
-tbody tr.checked:hover, tbody tr.checked.bad:hover, tbody tr.checked.warn:hover {
-  background: var(--vscode-list-hoverBackground);
-}
 
 /*
  * The keyboard cursor. An outline rather than a fill, so it can sit on a row
