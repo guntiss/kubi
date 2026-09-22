@@ -495,16 +495,19 @@
 
   // ---------- rendering ----------
 
-  /** One cycle of the pending rows' pulse; matches `warn-pulse` in the CSS. */
-  const PULSE_MS = 2400;
-
   /**
-   * Points `--pulse-delay` at where the pulse is right now, so any row that
-   * starts pulsing during this render starts at the same phase as the rows
-   * already on screen. See `warn-pulse` in the CSS.
+   * Puts every pending row's pulse on one clock. A CSS animation starts when
+   * its row gets the class, so rows built by different refreshes would each
+   * pulse on their own beat; a start time of zero on the document timeline
+   * gives them all the same phase. Deferred to after the render that may have
+   * added rows. See `warn-pulse` in the CSS.
    */
   function syncPulse() {
-    document.documentElement.style.setProperty('--pulse-delay', `-${Math.round(performance.now() % PULSE_MS)}ms`);
+    queueMicrotask(() => {
+      for (const anim of document.getAnimations()) {
+        if (anim.animationName === 'warn-pulse' && anim.startTime !== 0) anim.startTime = 0;
+      }
+    });
   }
 
   function render() {

@@ -533,33 +533,37 @@ tbody tr.bad:hover { background: rgba(244, 76, 76, 0.22); }
  * treatment in orange: not a failure, but not settled either, so it is worth
  * spotting in the same sweep of the eye. Orange rather than the yellow of the
  * status icon, which at this opacity over a light theme washes out to nothing.
- */
-tbody tr.warn { background: rgba(224, 138, 30, 0.13); }
-tbody tr.warn:hover { background: rgba(224, 138, 30, 0.22); }
-
-/*
+ *
  * And it pulses, since a pending row is one that is expected to change: the
  * motion says "still in progress" where a steady wash could be a settled
- * state. The hover shade gets its own keyframes, because a running animation
- * outranks the plain `:hover` rule and would otherwise swallow it.
+ * state.
  *
- * `--pulse-delay` is set by the script to a negative offset into the cycle,
- * taken from one clock, so a row built by a refresh joins the rows already on
- * screen in step instead of starting its own pulse out of phase with them.
+ * What animates is `--pulse`, a 0–1 level, rather than the colour itself: the
+ * rest and hover shades are both worked out from it in ordinary rules, so the
+ * hover rule still applies — a running animation of `background-color` would
+ * outrank it — and hovering does not restart the pulse by swapping keyframes.
+ *
+ * The script pins every pulse to the same start time (see `syncPulse`), so a
+ * row that turns pending on a refresh pulses in step with the rest.
  */
+@property --pulse {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
 @keyframes warn-pulse {
-  0%, 100% { background-color: rgba(224, 138, 30, 0.10); }
-  50% { background-color: rgba(224, 138, 30, 0.30); }
+  0%, 100% { --pulse: 0; }
+  50% { --pulse: 1; }
 }
-@keyframes warn-pulse-hover {
-  0%, 100% { background-color: rgba(224, 138, 30, 0.20); }
-  50% { background-color: rgba(224, 138, 30, 0.38); }
+tbody tr.warn {
+  background: rgba(224, 138, 30, calc(0.10 + 0.20 * var(--pulse)));
+  animation: warn-pulse 2.4s ease-in-out infinite;
 }
-tbody tr.warn { animation: warn-pulse 2.4s ease-in-out var(--pulse-delay, 0s) infinite; }
-tbody tr.warn:hover { animation-name: warn-pulse-hover; }
+tbody tr.warn:hover { background: rgba(224, 138, 30, calc(0.20 + 0.18 * var(--pulse))); }
 
 @media (prefers-reduced-motion: reduce) {
-  tbody tr.warn { animation: none; }
+  /* Held at the shade the wash had before it pulsed. */
+  tbody tr.warn { animation: none; --pulse: 0.15; }
 }
 
 /*
