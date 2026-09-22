@@ -4,6 +4,26 @@ All notable changes to Kubi are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] — 2026-09-22
+
+### Added
+
+- Add "Preserve cache after updates" setting, on by default,
+
+### Changed
+
+- Bump the package version alongside the changelog entry.
+- Hide the action bar when nothing is selected.
+- Fade and collapse rows when they leave the table.
+- Stop the row flash firing on age alone.
+- Shorten the row-change flash to 1.4s.
+- Make the row-change flash fade out instead of switching off.
+
+### Fixed
+
+- Checkbox sometimes doesn't reset.
+- Fix uncaught "Webview is disposed" errors.
+
 ## [1.0.2] — 2026-09-21
 
 ### Added

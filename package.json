@@ -2,7 +2,7 @@
   "name": "kubi",
   "displayName": "Kubi - Kubernetes GUI",
   "description": "Manage Kubernetes clusters in VS Code at lightning speed.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "guntiss",
   "license": "MIT",
   "icon": "media/icon.png",
