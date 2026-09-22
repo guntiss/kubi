@@ -551,25 +551,60 @@ tbody tr.selected.checked, tbody tr.selected.checked:hover {
  * repaint through the same path, and flashing what the user just did themselves
  * would train them to ignore the flash.
  *
- * Painted with `background-image` on the cells rather than `background` on the
- * row, because every row background is already spoken for — the health wash,
- * the tick tint, the open-row fill — and a flash that replaced one of those
- * would drop the row's real state for the length of the animation. An image
- * layers over the colour underneath and leaves it intact, so a failing row
+ * Drawn as a layer of its own over each cell rather than as the cell's
+ * background, because every row background is already spoken for — the health
+ * wash, the tick tint, the open-row fill — and a flash that replaced one of
+ * those would drop the row's real state for the length of the animation. The
+ * layer sits over the colour underneath and leaves it intact, so a failing row
  * flashes and still reads as failing. Cells rather than the row itself because
  * a row's own background paints behind its cells', where it would be hidden.
  *
- * `box-shadow` is left alone for the same reason: the keyboard cursor draws its
- * outline with it, and a flash using it would erase the cursor as it passed.
+ * `z-index: -1` puts the layer behind the cell's own content, so the text stays
+ * at full contrast as the tint passes and the keyboard cursor — an inset
+ * `box-shadow`, which paints above the background — is not covered by it.
+ * The cell clips it: `tbody td` is already `overflow: hidden`.
+ *
+ * What fades is the layer's opacity, not a colour. A `background-image` is not
+ * an interpolable property: Chromium steps from one value to the other at the
+ * halfway point, so an earlier version of this that animated between two
+ * gradients did not fade at all — it held the tint for 1.3s and then dropped
+ * it, which read as the colour simply being switched off.
+ *
+ * The tint holds at full strength for the first fifth, then fades over the
+ * rest. Without the hold, a row that changes while the eye is elsewhere can be
+ * most of the way faded by the time it is looked at; the hold is what makes the
+ * change catchable, and the fade after it is what reads as a fade.
  */
 @keyframes row-flash {
-  from { background-image: linear-gradient(var(--flash-tint), var(--flash-tint)); }
-  to { background-image: linear-gradient(transparent, transparent); }
+  0%, 20% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
-/* The script removes the class on the same span; see FLASH_MS in dashboard.js. */
-tbody tr.flash > td, tbody tr.flash-new > td {
-  animation: row-flash 2.6s ease-out;
+/*
+ * Linear, so the alpha comes off at a steady rate across the whole fade. An
+ * eased curve spends most of its travel in the opening moments and leaves a
+ * long, nearly invisible tail, which is seen as the tint disappearing at once.
+ *
+ * `forwards` matters as much as the fade itself. The script takes the class off
+ * on its own timer, nominally at the same 2.6s, but a `setTimeout` always lands
+ * a little after the animation ends — and with the default `fill-mode: none`
+ * the layer reverts to its unanimated `opacity: 1` the instant the animation
+ * finishes. The tint snapped back to full strength for that gap and was then
+ * cut off with the class, which is the abrupt change the fade was meant to
+ * remove. Holding the last frame keeps it invisible however late the timer is.
+ *
+ * The script removes the class on the same span; see FLASH_MS in dashboard.js.
+ */
+tbody tr.flash > td, tbody tr.flash-new > td { position: relative; }
+
+tbody tr.flash > td::after, tbody tr.flash-new > td::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--flash-tint);
+  animation: row-flash 2.6s linear forwards;
 }
 
 /*
@@ -584,11 +619,19 @@ tbody tr.flash-new > td { --flash-tint: rgba(64, 190, 120, 0.32); }
   /*
    * The mark still has to be visible — it is information, not decoration — so
    * it is held steady for the same span and then removed by the same timer,
-   * rather than fading. `steps(1)` holds the opening frame for the whole
-   * duration and never animates between the two.
+   * rather than fading.
+   *
+   * A separate set of keyframes rather than `steps(1)` over the fading ones:
+   * the timing function applies to each interval on its own, so against
+   * `row-flash`'s 20% hold it would step to clear a fifth of the way in and cut
+   * the mark to a fraction of the span the timer is holding the class for.
    */
-  tbody tr.flash > td, tbody tr.flash-new > td {
-    animation-timing-function: steps(1);
+  @keyframes row-flash-hold {
+    from, to { opacity: 1; }
+  }
+
+  tbody tr.flash > td::after, tbody tr.flash-new > td::after {
+    animation-name: row-flash-hold;
   }
 }
 
