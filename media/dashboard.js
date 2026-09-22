@@ -2734,58 +2734,48 @@
   ];
 
   /**
-   * The action bar along the bottom of a table view. Always present, so the
-   * list never shifts as rows are ticked and there is a fixed place to look for
-   * what can be done with a selection — it is the home for bulk actions
+   * The action bar along the bottom of a table view: the home for bulk actions
    * generally, not just delete.
    *
-   * With nothing ticked it states that, and its buttons are disabled rather
-   * than hidden: a control that vanishes cannot be discovered before it is
-   * needed, and the bar would change height as buttons came and went.
-   */
-  /**
+   * It exists only while rows are ticked. Idle it had nothing to say but that
+   * nothing was selected, and neither a row of dead buttons nor an empty strip
+   * earns the space — the list gets it back instead.
+   *
    * `visible` is the rows already on screen, when the caller has them. It is
    * only ever an optimisation: left out, the bar works them out for itself.
    */
   function renderActionBar(visible) {
     if (!isTable() || state.error || state.empty) return null;
     const rows = (visible ?? visibleRows()).filter(isChecked);
+    if (rows.length === 0) return null;
     const kind = kindOf(state.active);
     const noun = rows.length === 1
       ? (kind ? kind.singular.toLowerCase() : 'item')
       : (kind ? kind.label.toLowerCase() : 'items');
-    const any = rows.length > 0;
 
-    return el('div', { class: 'action-bar' + (any ? ' active' : '') },
+    return el('div', { class: 'action-bar active' },
       el('span', {
-        class: 'selection-count' + (any ? '' : ' none'),
-        text: any ? `${rows.length} ${noun} selected` : 'Nothing selected'
+        class: 'selection-count',
+        text: `${rows.length} ${noun} selected`
       }),
-      any
-        ? el('button', {
-            class: 'link',
-            title: 'Clear the selection',
-            onclick: () => { clearChecked(); renderContentOnly(); }
-          }, 'Clear')
-        : null,
+      el('button', {
+        class: 'link',
+        title: 'Clear the selection',
+        onclick: () => { clearChecked(); renderContentOnly(); }
+      }, 'Clear'),
       el('span', { class: 'spacer' }),
       ...bulkActionsFor(kind).map((action) => el('button', {
         class: action.danger ? 'danger' : '',
-        disabled: !any,
-        title: (any ? action.title(rows, noun) : `Select rows to ${action.id} them`)
+        title: action.title(rows, noun)
           + (action.key ? ` (${modifierLabel()}+${action.key.toUpperCase()})` : ''),
         onclick: () => action.run(rows)
-      }, any ? action.label(rows) : capitalize(action.id)))
+      }, action.label(rows)))
     );
   }
 
   /** The bulk actions that mean anything for a kind, in bar order. */
   function bulkActionsFor(kind) {
     return BULK_ACTIONS.filter((action) => !action.applies || action.applies(kind));
-  }
-
-  function capitalize(text) {
-    return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
   /** What to call the Ctrl/Cmd key in a tooltip, per platform. */

@@ -790,10 +790,11 @@ input.row-check:focus-visible { outline: 1px solid var(--vscode-focusBorder); ou
  * acts on a selection.
  *
  * A row of the main column, below the scrolling list rather than inside or over
- * it. Being permanent is what keeps the list still — a bar that appeared with
- * the first tick pushed every row down mid-click — and it means the list never
- * has to reserve space for an overlay, so the last row is always reachable.
- * The toolbar bounds the view at the top; this bounds it at the bottom.
+ * it, so the list never has to reserve space for an overlay and the last row is
+ * always reachable.
+ *
+ * It is here only while something is ticked; with nothing selected it is not
+ * rendered at all, and the list takes the height back.
  */
 .action-bar {
   flex: none;
@@ -807,17 +808,12 @@ input.row-check:focus-visible { outline: 1px solid var(--vscode-focusBorder); ou
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
 }
 
-/*
- * Idle, the bar recedes: it is a label and two disabled buttons, and should not
- * compete with the list above it. It comes up to full contrast once there is a
- * selection to act on.
- */
+/* The count leads the bar, so it is the one thing set in bold. */
 .action-bar .selection-count {
   font-size: 0.9em;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.action-bar .selection-count.none { color: var(--muted); }
-.action-bar.active .selection-count { font-weight: 600; }
 
 /* A quiet secondary beside the action buttons it sits with. */
 .action-bar button.link {
@@ -829,27 +825,6 @@ input.row-check:focus-visible { outline: 1px solid var(--vscode-focusBorder); ou
 .action-bar button.link:hover {
   color: var(--vscode-foreground);
   background: var(--vscode-list-hoverBackground);
-}
-
-/*
- * Disabled is the bar's resting state, so it has to read as "not yet" rather
- * than as broken: dimmed, but still legibly a button, and without the pointer
- * cursor that would invite a click.
- */
-.action-bar button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.action-bar button:disabled:hover {
-  background: var(--vscode-button-secondaryBackground, transparent);
-  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
-  border-color: var(--border);
-}
-/* The danger tint belongs to an armed button; disabled it would be a threat
-   about something that cannot happen. */
-.action-bar button.danger:disabled:hover {
-  background: var(--vscode-button-secondaryBackground, transparent);
-  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
 }
 
 td.numeric, th.numeric { text-align: right; font-variant-numeric: tabular-nums; }
