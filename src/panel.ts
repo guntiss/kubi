@@ -296,7 +296,7 @@ export class DashboardPanel {
     if (savedKind && isKnownKind(savedKind)) {
       this.activeKind = savedKind;
     }
-    this.panel.iconPath = vscode.Uri.joinPath(extension.extensionUri, 'media', 'icon-mono.svg');
+    this.panel.iconPath = vscode.Uri.joinPath(extension.extensionUri, 'media', 'icon-tab.svg');
     this.panel.webview.html = this.html();
 
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
