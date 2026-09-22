@@ -142,10 +142,10 @@
      */
     editing: [],
     /**
-     * Row keys ticked for a bulk action. Keys rather than rows, so a refresh
-     * that replaces every row object keeps the selection pointing at the same
-     * objects. A row that has since been deleted simply stops matching, and
-     * `checkedRows` drops it.
+     * Object keys ticked for a bulk action (see `checkKey`). Keys rather than
+     * rows, so a refresh that replaces every row object keeps the selection
+     * pointing at the same objects. A row that has since been deleted simply
+     * stops matching, and `checkedRows` drops it.
      * @type {Set<string>}
      */
     checked: new Set(),
@@ -292,13 +292,26 @@
       && state.selected.namespace === row.namespace;
   }
 
-  /** Identity of a row within the active kind, used as its checkbox key. */
+  /** Identity of a row within the active kind: where it sits in the table. */
   function rowKey(row) {
     return `${row.namespace ?? ''}\u0000${row.name}`;
   }
 
+  /**
+   * Identity of the object a row stands for, used as its checkbox key. Unlike
+   * `rowKey` this pins the tick to one particular object: a pod deleted and
+   * recreated under the same name — a StatefulSet replica, or a Deployment pod
+   * whose name repeats — is a different object, and the new one must arrive
+   * unticked rather than inheriting a tick aimed at the one just deleted.
+   * Objects the API server reports without a uid fall back to the name, which
+   * is the behaviour this replaced.
+   */
+  function checkKey(row) {
+    return row.uid ? `uid\u0000${row.uid}` : rowKey(row);
+  }
+
   function isChecked(row) {
-    return state.checked.has(rowKey(row));
+    return state.checked.has(checkKey(row));
   }
 
   function isCursor(row) {
@@ -360,7 +373,7 @@
   /** Drops ticks for rows a refresh no longer reports. */
   function pruneChecked(rows) {
     if (!state.checked.size) return;
-    const live = new Set(rows.map(rowKey));
+    const live = new Set(rows.map(checkKey));
     for (const key of [...state.checked]) {
       if (!live.has(key)) state.checked.delete(key);
     }
@@ -2066,9 +2079,9 @@
         // the box is actually clicked.
         for (const row of visibleRows()) {
           if (e.target.checked) {
-            state.checked.add(rowKey(row));
+            state.checked.add(checkKey(row));
           } else {
-            state.checked.delete(rowKey(row));
+            state.checked.delete(checkKey(row));
           }
         }
         renderContentOnly();
@@ -2653,7 +2666,7 @@
     const from = anchor === -1 ? index : Math.min(anchor, index);
     const to = anchor === -1 ? index : Math.max(anchor, index);
     for (let i = from; i <= to; i++) {
-      const key = rowKey(rows[i]);
+      const key = checkKey(rows[i]);
       if (checked) {
         state.checked.add(key);
       } else {

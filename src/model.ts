@@ -47,6 +47,14 @@ export interface Row {
   name: string;
   namespace?: string;
   /**
+   * `metadata.uid`: the one field that tells two objects apart when they share
+   * a name. A pod deleted and recreated under the same name is a different
+   * object, and the webview keys a row's tick by this so the new one does not
+   * inherit the old one's checkbox. Optional because some kinds are synthesised
+   * rather than read back from the API server.
+   */
+  uid?: string;
+  /**
    * Creation time, carried so the webview can recompute the age cell. A cached
    * row is replayed long after it was fetched, and a frozen "5m" would lie.
    */
@@ -538,7 +546,8 @@ export function toRow(kindId: string, object: k.KubeObject): Row {
     search: Object.values(cells).join(' ').toLowerCase(),
     ...(built.containers ? { containers: built.containers } : {}),
     ...(built.replicas !== undefined ? { replicas: built.replicas } : {}),
-    ...(owner ? { owner } : {})
+    ...(owner ? { owner } : {}),
+    ...(object.metadata.uid ? { uid: object.metadata.uid } : {})
   };
 }
 
