@@ -2924,10 +2924,19 @@
     // the terminal. The detail panel is the place to choose a specific one.
     const pod = kind.id === 'pods';
     const act = (action) => () => post(actionMessage(kind, row, action));
-    const running = (row.containers || []).some((c) => c.kind === 'app' && c.state === 'Running');
+    const app = (row.containers || []).filter((c) => c.kind === 'app');
+    const running = app.some((c) => c.state === 'Running');
+    // A previous container only exists once one has died; `kubectl logs -p`
+    // errors out otherwise, so the item is absent until a restart happens.
+    const restarted = app.some((c) => c.restarts);
     const items = [
       { label: 'Describe', run: () => { selectRow(row); openDetailTab('describe'); }, title: 'kubectl describe, in the detail panel' },
       ...(pod ? [
+        restarted ? {
+          label: 'Previous logs',
+          run: act('logs-previous'),
+          title: 'kubectl logs -p --tail 100, in a terminal'
+        } : undefined,
         { label: 'Logs', run: act('logs'), title: 'kubectl logs -f --tail 100, in a terminal' },
         {
           label: 'Shell',
@@ -2935,7 +2944,7 @@
           disabled: !running,
           title: running ? 'kubectl exec into the default container' : 'Only a running container can be shelled into'
         }
-      ] : []),
+      ].filter(Boolean) : []),
       null,
       ...objectActions(kind, row)
     ];
