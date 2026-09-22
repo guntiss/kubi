@@ -82,6 +82,10 @@
      * ownership rather than by label selector keeps two workloads that share
      * an `app=` label out of each other's lists.
      *
+     * A node scope has no owners: its pods are the ones scheduled onto it,
+     * which every pod row already carries, so it is set here in the view
+     * without asking the extension.
+     *
      * @type {{kind: string, name: string, namespace?: string, owners: string[]} | null}
      */
     scope: null,
@@ -935,7 +939,7 @@
     }
     if (state.status) parts.push(`status ${statusLabel().toLowerCase()}`);
     if (state.filter.trim()) parts.push(`query “${state.filter.trim()}”`);
-    if (state.scope) parts.push(`owned by ${singularOf(state.scope.kind).toLowerCase()} ${state.scope.name}`);
+    if (state.scope) parts.push(scopeSummary());
     return parts.join(' · ');
   }
 
@@ -996,6 +1000,12 @@
     }, `← ${label}`);
   }
 
+  /** What the scope narrows to, in prose: 'owned by deployment web' or 'on node ip-10-0-1-5'. */
+  function scopeSummary() {
+    const { kind, name } = state.scope;
+    return kind === 'nodes' ? `on node ${name}` : `owned by ${singularOf(kind).toLowerCase()} ${name}`;
+  }
+
   /** A kind's singular label, for prose: 'deployments' -> 'Deployment'. */
   function singularOf(kindId) {
     const kind = kindOf(kindId);
@@ -1015,12 +1025,12 @@
     // A Deployment matches through its ReplicaSets, and how many were found is
     // the difference between "no pods yet" and "the rollout has two revisions
     // live" — worth having in reach without being in the way.
-    const via = owners.length === 1 && owners[0] === name
+    const via = kind === 'nodes' || (owners.length === 1 && owners[0] === name)
       ? ''
       : `\nMatching ${owners.length} ${owners.length === 1 ? 'ReplicaSet' : 'ReplicaSets'}: ${owners.join(', ') || 'none'}`;
     return el('div', {
       class: 'scope-chip',
-      title: `Showing only pods owned by ${singularOf(kind).toLowerCase()} ${name}`
+      title: `Showing only pods ${scopeSummary()}`
         + (namespace ? ` in ${namespace}` : '') + via
     },
       el('span', { class: 'scope-kind', text: singularOf(kind) }),
@@ -1928,6 +1938,7 @@
    */
   function inScope(row) {
     if (!state.scope) return true;
+    if (state.scope.kind === 'nodes') return row.cells.node === state.scope.name;
     if (state.scope.namespace && row.namespace !== state.scope.namespace) return false;
     return Boolean(row.owner && state.scope.owners.includes(row.owner.name));
   }
@@ -2871,7 +2882,9 @@
     if (ownsPods(kind.id)) {
       actions.push(el('button', {
         onclick: () => { selectRow(null); showOwned(kind.id, row); },
-        title: `Show only the pods of this ${kind.singular.toLowerCase()}`
+        title: kind.id === 'nodes'
+          ? 'Show only the pods running on this node'
+          : `Show only the pods of this ${kind.singular.toLowerCase()}`
       }, 'Pods'));
     }
     // Only the kinds with a spec.replicas the scale subresource can write; see
@@ -3269,8 +3282,9 @@
    * Kinds whose rows have pods underneath them. A CronJob reaches them through
    * its Jobs and a Deployment through its ReplicaSets; the extension walks
    * whichever hop is needed, so this list is just "does asking make sense".
+   * A node does not own its pods but hosts them, and gets the same jump.
    */
-  const POD_OWNERS = ['deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs', 'replicasets'];
+  const POD_OWNERS = ['deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs', 'replicasets', 'nodes'];
 
   function ownsPods(kindId) {
     return POD_OWNERS.includes(kindId);
@@ -3285,10 +3299,39 @@
    */
   let pendingOrigin = null;
 
-  /** Opens the pods table scoped to one workload. */
+  /** Opens the pods table scoped to one workload, or to the pods on one node. */
   function showOwned(kindId, row) {
     pendingOrigin = { kind: kindId, name: row.name, namespace: row.namespace };
+    // Every pod row names its node, so there is nothing for the extension to
+    // resolve and the scope is entered straight away.
+    if (kindId === 'nodes') {
+      enterScope('pods', { kind: kindId, name: row.name, owners: [] });
+      return;
+    }
     post({ type: 'showOwned', kind: kindId, name: row.name, namespace: row.namespace });
+  }
+
+  /** Switches to `kindId` narrowed to `scope`, with a way back to where the jump started. */
+  function enterScope(kindId, scope) {
+    // Switching kinds clears any scope, so `select` runs first and the
+    // new one is applied after it.
+    select(kindId);
+    state.scope = scope;
+    // Claimed here rather than at the click, so a resolve that never lands
+    // leaves no back button behind, and one drill-down started while
+    // another was in flight cannot leave the older origin on screen.
+    state.origin = pendingOrigin;
+    pendingOrigin = null;
+    // A scope is a narrowing of its own; a namespace left over from the
+    // previous view would narrow it further and could hide every pod, so
+    // the picker is moved to the scope's own namespace — or widened to all
+    // of them for a node, whose pods span every namespace.
+    const namespace = scope.namespace ?? state.allNamespaces;
+    if (state.namespace !== namespace) {
+      state.namespace = namespace;
+      post({ type: 'setNamespace', namespace: state.namespace });
+    }
+    render();
   }
 
   function select(kindId) {
@@ -3478,23 +3521,7 @@
           }
           break;
         }
-        // Switching kinds clears any scope, so `select` runs first and the
-        // new one is applied after it.
-        select(message.kind);
-        state.scope = message.scope;
-        // Claimed here rather than at the click, so a resolve that never lands
-        // leaves no back button behind, and one drill-down started while
-        // another was in flight cannot leave the older origin on screen.
-        state.origin = pendingOrigin;
-        pendingOrigin = null;
-        // A scope is a narrowing of its own; a namespace left over from the
-        // previous view would narrow it further and could hide every pod, so
-        // the picker is moved to the scope's own namespace.
-        if (message.scope.namespace && state.namespace !== message.scope.namespace) {
-          state.namespace = message.scope.namespace;
-          post({ type: 'setNamespace', namespace: state.namespace });
-        }
-        render();
+        enterScope(message.kind, message.scope);
         break;
       case 'error':
         if (message.kind !== state.active) break;
