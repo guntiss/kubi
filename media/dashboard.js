@@ -2781,7 +2781,7 @@
     ...['cordon', 'uncordon', 'drain'].map((id) => ({
       id,
       applies: (kind) => Boolean(kind && kind.id === 'nodes'),
-      label: (rows) => `${id.charAt(0).toUpperCase()}${id.slice(1)} ${rows.length}${id === 'drain' ? '…' : ''}`,
+      label: (rows) => `${id.charAt(0).toUpperCase()}${id.slice(1)} ${rows.length}`,
       title: (rows, noun) => ({
         cordon: `Stop new pods being scheduled on the ${rows.length} selected ${noun}`,
         uncordon: `Let new pods be scheduled on the ${rows.length} selected ${noun} again`,
@@ -2916,7 +2916,7 @@
         ? { label: 'Uncordon', run: node('uncordon'), title: 'Let new pods be scheduled on this node again' }
         : { label: 'Cordon', run: node('cordon'), title: 'Stop new pods being scheduled on this node' });
       actions.push({
-        label: 'Drain…',
+        label: 'Drain',
         run: node('drain'),
         title: 'Cordon the node and evict its pods, in a terminal'
       });
