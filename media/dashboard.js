@@ -2920,36 +2920,12 @@
     closeRowMenu();
     const kind = kindOf(state.active);
     const run = (fn) => () => { closeRowMenu(); fn(); };
-    // A pod's logs and shell are what it is most often right-clicked for, so
-    // they sit at the top. No container is named: kubectl picks the pod's
-    // default-container annotation, or its first container, and names it in
-    // the terminal. The detail panel is the place to choose a specific one.
-    const pod = kind.id === 'pods';
-    const act = (action) => () => post(actionMessage(kind, row, action));
-    const ordinary = (row.containers || []).filter((c) => c.kind === 'app');
-    const running = ordinary.some((c) => c.state === 'Running');
-    // A previous container only exists once one has died; `kubectl logs -p`
-    // errors out otherwise, so the item is absent until a restart happens.
-    const restarted = ordinary.some((c) => c.restarts);
-    const items = [
-      { label: 'Describe', run: () => { selectRow(row); openDetailTab('describe'); }, title: 'kubectl describe, in the detail panel' },
-      ...(pod ? [
-        restarted ? {
-          label: 'Previous logs',
-          run: act('logs-previous'),
-          title: 'kubectl logs -p --tail 100, in a terminal'
-        } : undefined,
-        { label: 'Logs', run: act('logs'), title: 'kubectl logs -f --tail 100, in a terminal' },
-        {
-          label: 'Shell',
-          run: act('shell'),
-          disabled: !running,
-          title: running ? 'kubectl exec into the default container' : 'Only a running container can be shelled into'
-        }
-      ].filter(Boolean) : []),
-      null,
-      ...objectActions(kind, row)
-    ];
+    // Right-clicking one of several ticked rows acts on all of them, as in a
+    // file explorer, so only what the action bar can do to the lot is offered.
+    // A row outside the selection, or a selection of one, gets its own menu.
+    const ticked = isChecked(row) ? checkedRows() : [];
+    const bulk = ticked.length > 1;
+    const items = bulk ? bulkMenuItems(kind, ticked) : rowMenuItems(kind, row);
     const buttons = [];
     const menu = el('div', { class: 'row-menu', role: 'menu' },
       ...items.map((item) => {
@@ -2979,9 +2955,62 @@
 
     // Held by key rather than by node: a refresh rewrites each row's classes
     // from state, and may rebuild the row outright, so the outline has to be
-    // something the row renderers can ask about.
-    rowMenu = { menu, key: rowKey(row), buttons };
-    tr.classList.add('menu-open');
+    // something the row renderers can ask about. A bulk menu outlines nothing;
+    // the ticks already show what it acts on.
+    rowMenu = { menu, key: bulk ? null : rowKey(row), buttons };
+    if (!bulk) tr.classList.add('menu-open');
+  }
+
+  /**
+   * The menu for a multi-row selection: the action bar's actions, in its
+   * order. The rows are looked up again on click, so one a refresh removed in
+   * the meantime is not acted on.
+   */
+  function bulkMenuItems(kind, rows) {
+    const noun = kind.label.toLowerCase();
+    return bulkActionsFor(kind).map((action) => ({
+      label: action.label(rows),
+      variant: action.danger ? 'danger' : '',
+      title: action.title(rows, noun),
+      run: () => {
+        const now = checkedRows();
+        if (now.length) action.run(now);
+      }
+    }));
+  }
+
+  /** The menu for a single row: the detail panel's actions, plus a pod's logs and shell. */
+  function rowMenuItems(kind, row) {
+    // A pod's logs and shell are what it is most often right-clicked for, so
+    // they sit at the top. No container is named: kubectl picks the pod's
+    // default-container annotation, or its first container, and names it in
+    // the terminal. The detail panel is the place to choose a specific one.
+    const pod = kind.id === 'pods';
+    const act = (action) => () => post(actionMessage(kind, row, action));
+    const ordinary = (row.containers || []).filter((c) => c.kind === 'app');
+    const running = ordinary.some((c) => c.state === 'Running');
+    // A previous container only exists once one has died; `kubectl logs -p`
+    // errors out otherwise, so the item is absent until a restart happens.
+    const restarted = ordinary.some((c) => c.restarts);
+    return [
+      { label: 'Describe', run: () => { selectRow(row); openDetailTab('describe'); }, title: 'kubectl describe, in the detail panel' },
+      ...(pod ? [
+        restarted ? {
+          label: 'Previous logs',
+          run: act('logs-previous'),
+          title: 'kubectl logs -p --tail 100, in a terminal'
+        } : undefined,
+        { label: 'Logs', run: act('logs'), title: 'kubectl logs -f --tail 100, in a terminal' },
+        {
+          label: 'Shell',
+          run: act('shell'),
+          disabled: !running,
+          title: running ? 'kubectl exec into the default container' : 'Only a running container can be shelled into'
+        }
+      ].filter(Boolean) : []),
+      null,
+      ...objectActions(kind, row)
+    ];
   }
 
   function closeRowMenu() {
