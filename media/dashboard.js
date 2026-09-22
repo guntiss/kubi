@@ -2244,6 +2244,10 @@
         onclick: () => {
           selectRow(isSelected(live.row) ? null : live.row);
           renderContentOnly();
+        },
+        oncontextmenu: (e) => {
+          e.preventDefault();
+          openRowMenu(e, tr, live.row);
         }
       },
         // The whole cell ticks, not just the 13px box inside it. Ticking is the
@@ -2836,6 +2840,147 @@
     return navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
   }
 
+  /** The message that asks the extension to run `action` on one object. */
+  function actionMessage(kind, row, action, container) {
+    return {
+      type: 'action', action, kind: kind.id, name: row.name, namespace: row.namespace, container,
+      // Only scale reads this; the extension opens its prompt on the count the
+      // row is showing rather than re-fetching the object to find it.
+      replicas: row.replicas
+    };
+  }
+
+  /**
+   * What can be done to one object, in the order the detail panel's buttons
+   * show it. Declared once, as data, so the panel and the row's context menu
+   * offer the same things and cannot drift apart.
+   */
+  function objectActions(kind, row) {
+    const act = (action) => () => post(actionMessage(kind, row, action));
+
+    // Only this object's own open editor disables the button. Other objects
+    // edit in parallel; re-editing this one would race the tab already open,
+    // since each kubectl edit applies over the snapshot it started from.
+    const editingThis = state.editing.includes(editKey(kind.id, row));
+
+    const actions = [{
+      label: 'Neat YAML',
+      variant: 'primary',
+      run: act('neat'),
+      title: 'YAML with the cluster bookkeeping stripped, via kubectl-neat'
+    }];
+    // An event is a record the API server writes and expires on its own, so
+    // editing one is meaningless — the field you changed is overwritten or the
+    // record is gone. Every other kind is a spec someone is meant to change.
+    if (kind.id !== 'events') {
+      actions.push({
+        label: editingThis ? 'Editing…' : 'Edit',
+        run: act('edit'),
+        disabled: editingThis,
+        title: editingThis
+          ? 'Editing — close the editor tab to apply'
+          : 'kubectl edit in a VS Code tab'
+      });
+    }
+    // Drilling into a workload's pods, for the kinds that have them. It sits
+    // before Scale and Delete: reading what a workload is running comes ahead
+    // of changing it, and it is the only action here that navigates rather
+    // than acting on the object.
+    if (ownsPods(kind.id)) {
+      actions.push({
+        label: 'Pods',
+        run: () => { selectRow(null); showOwned(kind.id, row); },
+        title: kind.id === 'nodes'
+          ? 'Show only the pods running on this node'
+          : `Show only the pods of this ${kind.singular.toLowerCase()}`
+      });
+    }
+    // Only the kinds with a spec.replicas the scale subresource can write; see
+    // `scalable` in model.ts for why DaemonSets and Jobs are not among them.
+    if (kind.scalable) {
+      const at = row.replicas !== undefined ? ` (currently ${row.replicas})` : '';
+      actions.push({ label: 'Scale…', run: act('scale'), title: `Set the replica count${at}` });
+    }
+    actions.push({ label: 'Delete', variant: 'danger', run: act('delete') });
+    return actions;
+  }
+
+  /** The row context menu on screen, if any. */
+  let rowMenu = null;
+
+  /**
+   * A right-click menu on a table row, offering what the detail panel's
+   * buttons do without opening the panel first. Built from `objectActions`,
+   * so the two cannot drift apart. It lives on the body, outside the table,
+   * so a refresh rebuilding the rows underneath does not take it with it.
+   */
+  function openRowMenu(event, tr, row) {
+    closeRowMenu();
+    const kind = kindOf(state.active);
+    const run = (fn) => () => { closeRowMenu(); fn(); };
+    const items = [
+      { label: 'Details', run: () => { selectRow(row); renderContentOnly(); } },
+      null,
+      ...objectActions(kind, row)
+    ];
+    const buttons = [];
+    const menu = el('div', { class: 'row-menu', role: 'menu' },
+      ...items.map((item) => {
+        if (!item) return el('div', { class: 'separator', role: 'separator' });
+        const button = el('button', {
+          class: item.variant === 'danger' ? 'danger' : '',
+          role: 'menuitem',
+          disabled: item.disabled,
+          title: item.title,
+          onclick: run(item.run)
+        }, item.label);
+        if (!item.disabled) buttons.push(button);
+        return button;
+      })
+    );
+    document.body.appendChild(menu);
+
+    // Opened at the pointer, and flipped back inside the viewport when it
+    // would run off the right or bottom edge.
+    const box = menu.getBoundingClientRect();
+    const x = Math.min(event.clientX, window.innerWidth - box.width - 4);
+    const y = event.clientY + box.height > window.innerHeight
+      ? Math.max(4, event.clientY - box.height)
+      : event.clientY;
+    menu.style.left = `${Math.max(4, x)}px`;
+    menu.style.top = `${y}px`;
+
+    tr.classList.add('menu-open');
+    rowMenu = { menu, tr, buttons };
+  }
+
+  function closeRowMenu() {
+    if (!rowMenu) return;
+    rowMenu.menu.remove();
+    rowMenu.tr.classList.remove('menu-open');
+    rowMenu = null;
+  }
+
+  /** Arrow keys walk the menu's items, wrapping at either end. */
+  function stepRowMenu(step) {
+    const { buttons } = rowMenu;
+    if (!buttons.length) return;
+    const at = buttons.indexOf(document.activeElement);
+    const next = at === -1
+      ? (step > 0 ? 0 : buttons.length - 1)
+      : (at + step + buttons.length) % buttons.length;
+    buttons[next].focus();
+  }
+
+  // Anything that moves the ground under the menu dismisses it: a press
+  // anywhere else, a scroll, or the panel losing focus or size.
+  document.addEventListener('mousedown', (e) => {
+    if (rowMenu && !rowMenu.menu.contains(e.target)) closeRowMenu();
+  }, true);
+  document.addEventListener('scroll', () => closeRowMenu(), true);
+  window.addEventListener('blur', () => closeRowMenu());
+  window.addEventListener('resize', () => closeRowMenu());
+
   /** Item details, as a slide-over panel down the right of the dashboard. */
   function renderModal() {
     const row = state.selected;
@@ -2844,59 +2989,13 @@
       .filter((c) => c.key !== 'name' && cellValue(row, c.key) !== '')
       .map((c) => [c.label, cellValue(row, c.key)]);
 
-    const act = (action, container) => () => post({
-      type: 'action', action, kind: kind.id, name: row.name, namespace: row.namespace, container,
-      // Only scale reads this; the extension opens its prompt on the count the
-      // row is showing rather than re-fetching the object to find it.
-      replicas: row.replicas
-    });
-
-    // Only this object's own open editor disables the button. Other objects
-    // edit in parallel; re-editing this one would race the tab already open,
-    // since each kubectl edit applies over the snapshot it started from.
-    const editingThis = state.editing.includes(editKey(kind.id, row));
-
-    const actions = [
-      el('button', {
-        class: 'primary',
-        onclick: act('neat'),
-        title: 'YAML with the cluster bookkeeping stripped, via kubectl-neat'
-      }, 'Neat YAML')
-    ];
-    // An event is a record the API server writes and expires on its own, so
-    // editing one is meaningless — the field you changed is overwritten or the
-    // record is gone. Every other kind is a spec someone is meant to change.
-    if (kind.id !== 'events') {
-      actions.push(el('button', {
-        onclick: act('edit'),
-        disabled: editingThis,
-        title: editingThis
-          ? 'Editing — close the editor tab to apply'
-          : 'kubectl edit in a VS Code tab'
-      }, editingThis ? 'Editing…' : 'Edit'));
-    }
-    // Drilling into a workload's pods, for the kinds that have them. It sits
-    // before Scale and Delete: reading what a workload is running comes ahead
-    // of changing it, and it is the only action here that navigates rather
-    // than acting on the object.
-    if (ownsPods(kind.id)) {
-      actions.push(el('button', {
-        onclick: () => { selectRow(null); showOwned(kind.id, row); },
-        title: kind.id === 'nodes'
-          ? 'Show only the pods running on this node'
-          : `Show only the pods of this ${kind.singular.toLowerCase()}`
-      }, 'Pods'));
-    }
-    // Only the kinds with a spec.replicas the scale subresource can write; see
-    // `scalable` in model.ts for why DaemonSets and Jobs are not among them.
-    if (kind.scalable) {
-      const at = row.replicas !== undefined ? ` (currently ${row.replicas})` : '';
-      actions.push(el('button', {
-        onclick: act('scale'),
-        title: `Set the replica count${at}`
-      }, 'Scale…'));
-    }
-    actions.push(el('button', { class: 'danger', onclick: act('delete') }, 'Delete'));
+    const act = (action, container) => () => post(actionMessage(kind, row, action, container));
+    const actions = objectActions(kind, row).map((a) => el('button', {
+      class: a.variant,
+      onclick: a.run,
+      disabled: a.disabled,
+      title: a.title
+    }, a.label));
 
     // An event's name is a generated hash; its reason and target are what
     // identify it to a reader, so they take the heading.
@@ -3609,6 +3708,18 @@
   }
 
   document.addEventListener('keydown', (e) => {
+    // An open context menu has the keyboard to itself.
+    if (rowMenu) {
+      if (e.key === 'Escape' || e.key === 'Tab') {
+        e.preventDefault();
+        closeRowMenu();
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        stepRowMenu(e.key === 'ArrowDown' ? 1 : -1);
+      }
+      return;
+    }
+
     if (e.key === 'Escape' && state.selected) {
       selectRow(null);
       renderContentOnly();

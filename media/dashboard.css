@@ -561,6 +561,13 @@ tbody tr.cursor td {
 tbody tr.cursor td:first-child { box-shadow: inset 1px 1px 0 var(--vscode-focusBorder), inset 1px -1px 0 var(--vscode-focusBorder); }
 tbody tr.cursor td:last-child { box-shadow: inset -1px 1px 0 var(--vscode-focusBorder), inset -1px -1px 0 var(--vscode-focusBorder); }
 
+/* The row a context menu was opened on, so it is clear what the menu acts on. */
+tbody tr.menu-open td {
+  box-shadow: inset 0 1px 0 var(--vscode-focusBorder), inset 0 -1px 0 var(--vscode-focusBorder);
+}
+tbody tr.menu-open td:first-child { box-shadow: inset 1px 1px 0 var(--vscode-focusBorder), inset 1px -1px 0 var(--vscode-focusBorder); }
+tbody tr.menu-open td:last-child { box-shadow: inset -1px 1px 0 var(--vscode-focusBorder), inset -1px -1px 0 var(--vscode-focusBorder); }
+
 /* Selection outranks the health tint, so it stays obvious what is open. */
 tbody tr.selected, tbody tr.selected.bad, tbody tr.selected.bad:hover,
 tbody tr.selected.warn, tbody tr.selected.warn:hover,
@@ -1799,4 +1806,52 @@ body.rail-collapsed .rail-divider {
  */
 @media (max-width: 900px) {
   .secondary { display: none; }
+}
+
+/* ---------- row context menu ---------- */
+
+/*
+ * Styled after VS Code's own menus. Fixed and on the body, so neither the
+ * table's scroller nor the detail panel can clip or cover it; `openRowMenu`
+ * places it at the pointer.
+ */
+.row-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 160px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--vscode-menu-border, var(--border));
+  border-radius: var(--radius);
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  user-select: none;
+}
+.row-menu button {
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+.row-menu button:hover:not(:disabled),
+.row-menu button:focus-visible {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+  outline: none;
+}
+.row-menu button.danger:hover:not(:disabled),
+.row-menu button.danger:focus-visible {
+  background: var(--bad);
+  color: #fff;
+}
+.row-menu button:disabled { opacity: 0.5; cursor: default; }
+.row-menu .separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--vscode-menu-separatorBackground, var(--border));
 }
