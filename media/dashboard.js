@@ -2234,6 +2234,7 @@
           selected ? 'selected' : '',
           ticked ? 'checked' : '',
           isCursor(row) ? 'cursor' : '',
+          isMenuRow(row) ? 'menu-open' : '',
           row.health === 'bad' ? 'bad' : row.health === 'warn' ? 'warn' : ''
         ].filter(Boolean).join(' '),
         // Opening details is what a row click is for. It is the common thing
@@ -2639,6 +2640,7 @@
       selected ? 'selected' : '',
       ticked ? 'checked' : '',
       isCursor(row) ? 'cursor' : '',
+      isMenuRow(row) ? 'menu-open' : '',
       row.health === 'bad' ? 'bad' : row.health === 'warn' ? 'warn' : ''
     ].filter(Boolean).join(' ');
     if (tr.className !== className) tr.className = className;
@@ -2924,11 +2926,11 @@
     // the terminal. The detail panel is the place to choose a specific one.
     const pod = kind.id === 'pods';
     const act = (action) => () => post(actionMessage(kind, row, action));
-    const app = (row.containers || []).filter((c) => c.kind === 'app');
-    const running = app.some((c) => c.state === 'Running');
+    const ordinary = (row.containers || []).filter((c) => c.kind === 'app');
+    const running = ordinary.some((c) => c.state === 'Running');
     // A previous container only exists once one has died; `kubectl logs -p`
     // errors out otherwise, so the item is absent until a restart happens.
-    const restarted = app.some((c) => c.restarts);
+    const restarted = ordinary.some((c) => c.restarts);
     const items = [
       { label: 'Describe', run: () => { selectRow(row); openDetailTab('describe'); }, title: 'kubectl describe, in the detail panel' },
       ...(pod ? [
@@ -2975,15 +2977,23 @@
     menu.style.left = `${Math.max(4, x)}px`;
     menu.style.top = `${y}px`;
 
+    // Held by key rather than by node: a refresh rewrites each row's classes
+    // from state, and may rebuild the row outright, so the outline has to be
+    // something the row renderers can ask about.
+    rowMenu = { menu, key: rowKey(row), buttons };
     tr.classList.add('menu-open');
-    rowMenu = { menu, tr, buttons };
   }
 
   function closeRowMenu() {
     if (!rowMenu) return;
     rowMenu.menu.remove();
-    rowMenu.tr.classList.remove('menu-open');
     rowMenu = null;
+    for (const tr of app.querySelectorAll('tr.menu-open')) tr.classList.remove('menu-open');
+  }
+
+  /** Whether `row` is the one the open context menu acts on. */
+  function isMenuRow(row) {
+    return Boolean(rowMenu) && rowMenu.key === rowKey(row);
   }
 
   /** Arrow keys walk the menu's items, wrapping at either end. */
