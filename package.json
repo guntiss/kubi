@@ -67,6 +67,10 @@
         "command": "kubi.openContext",
         "title": "Kubi: Open Cluster",
         "icon": "$(link-external)"
+      },
+      {
+        "command": "kubi.openContextAnother",
+        "title": "Open Another Window"
       }
     ],
     "menus": {
@@ -82,11 +86,20 @@
           "command": "kubi.openContext",
           "when": "view == kubi.contexts && viewItem == k8scontext",
           "group": "inline@1"
+        },
+        {
+          "command": "kubi.openContextAnother",
+          "when": "view == kubi.contexts && viewItem == k8scontext",
+          "group": "navigation@1"
         }
       ],
       "commandPalette": [
         {
           "command": "kubi.openContext",
+          "when": "false"
+        },
+        {
+          "command": "kubi.openContextAnother",
           "when": "false"
         }
       ]

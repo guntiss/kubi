@@ -47,6 +47,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
+  register('kubi.openContextAnother', (node?: TreeNode) => {
+    if (isContextNode(node)) {
+      DashboardPanel.show(context, node.info.name, node.info, true);
+    }
+  });
+
   // Palette entry: pick a context, then open it.
   register('kubi.open', async () => {
     try {

@@ -81,9 +81,13 @@ type Inbound =
    */
   | { type: 'clearScope' };
 
-/** One dashboard per context, keyed by context name. */
+/**
+ * Dashboards keyed by context name. Opening a context reuses its dashboard;
+ * further ones for the same context are only opened on explicit request.
+ */
 export class DashboardPanel {
-  private static readonly open = new Map<string, DashboardPanel>();
+  /** Per context, ordered least to most recently focused. */
+  private static readonly open = new Map<string, DashboardPanel[]>();
   static readonly viewType = 'kubi.dashboard';
 
   /** One store shared by every panel; it is backed by a single globalState key. */
@@ -169,9 +173,18 @@ export class DashboardPanel {
    */
   private readonly reported = new Map<string, string>();
 
-  static show(context: vscode.ExtensionContext, contextName: string, contextInfo?: k.ContextInfo): void {
-    const existing = DashboardPanel.open.get(contextName);
-    if (existing) {
+  /**
+   * Reveals the context's most recently focused dashboard, or opens one if
+   * none is open. `another` skips the reuse and always opens a new one.
+   */
+  static show(
+    context: vscode.ExtensionContext,
+    contextName: string,
+    contextInfo?: k.ContextInfo,
+    another = false
+  ): void {
+    const existing = another ? [] : [...(DashboardPanel.open.get(contextName) ?? [])].reverse();
+    for (const candidate of existing) {
       // `reveal` throws "Webview is disposed" on a panel VS Code has already
       // torn down. That happens whenever the map entry outlives the panel:
       // `onDidDispose` is delivered asynchronously, so between the panel dying
@@ -180,12 +193,12 @@ export class DashboardPanel {
       // was closed with the dashboard open — would otherwise throw out of a
       // command handler as an uncaught runtime error.
       try {
-        existing.panel.reveal(existing.panel.viewColumn ?? vscode.ViewColumn.One);
+        candidate.panel.reveal(candidate.panel.viewColumn ?? vscode.ViewColumn.One);
         return;
       } catch {
-        // The entry is stale. Drop it and fall through to open a fresh panel,
-        // rather than leaving the context permanently unopenable.
-        existing.dispose();
+        // The entry is stale. Drop it and try the next one, falling through to
+        // a fresh panel rather than leaving the context permanently unopenable.
+        candidate.dispose();
       }
     }
     const panel = vscode.window.createWebviewPanel(
@@ -198,7 +211,14 @@ export class DashboardPanel {
         localResourceRoots: resourceRoots(context.extensionUri)
       }
     );
-    DashboardPanel.open.set(contextName, new DashboardPanel(panel, context, contextName, contextInfo));
+    DashboardPanel.track(new DashboardPanel(panel, context, contextName, contextInfo));
+  }
+
+  /** Records `panel` as its context's most recently focused dashboard. */
+  private static track(panel: DashboardPanel): void {
+    const list = (DashboardPanel.open.get(panel.contextName) ?? []).filter((p) => p !== panel);
+    list.push(panel);
+    DashboardPanel.open.set(panel.contextName, list);
   }
 
   /**
@@ -217,12 +237,6 @@ export class DashboardPanel {
         ? (state as { contextName: string }).contextName
         : undefined) ?? panel.title;
     if (!contextName) {
-      panel.dispose();
-      return;
-    }
-    // A reload with the same context already open — two panels cannot share one
-    // `open` entry, and the live one owns it.
-    if (DashboardPanel.open.has(contextName)) {
       panel.dispose();
       return;
     }
@@ -263,7 +277,7 @@ export class DashboardPanel {
     } catch {
       return;
     }
-    DashboardPanel.open.set(contextName, revived);
+    DashboardPanel.track(revived);
   }
 
   private constructor(
@@ -293,7 +307,13 @@ export class DashboardPanel {
     // the dashboard is exactly when the data is being looked at. It also
     // restarts the countdown, so a tick already due cannot land on top of the
     // rows this just fetched.
-    this.panel.onDidChangeViewState(() => this.onFocusRefresh(), null, this.disposables);
+    this.panel.onDidChangeViewState(() => {
+      // Clicking the context in the sidebar goes back to the dashboard used last.
+      if (this.panel.active) {
+        DashboardPanel.track(this);
+      }
+      this.onFocusRefresh();
+    }, null, this.disposables);
     // A panel stays `active` while the whole window sits in the background, so
     // without this the dashboard polls on behind another app. Window focus is
     // the other half of `isAttended`, and it changes without any view-state
@@ -329,10 +349,12 @@ export class DashboardPanel {
    * finds a map entry whose panel is already gone.
    */
   private dispose(): void {
-    // Only if *this* panel still owns the entry. A stale entry disposed late
-    // could otherwise evict the live panel that replaced it under the same
-    // context name, leaving a working dashboard unreachable by `show`.
-    if (DashboardPanel.open.get(this.contextName) === this) {
+    // Removes only this panel's own entry, so one disposed late cannot evict
+    // the other dashboards open on the same context.
+    const list = DashboardPanel.open.get(this.contextName)?.filter((p) => p !== this) ?? [];
+    if (list.length) {
+      DashboardPanel.open.set(this.contextName, list);
+    } else {
       DashboardPanel.open.delete(this.contextName);
     }
     if (this.refreshTimer) {
