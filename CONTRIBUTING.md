@@ -32,6 +32,7 @@ code --install-extension kubi-<version>.vsix
 | `src/extension.ts` | Activation: registers the tree view, commands and the webview serializer. |
 | `src/kubectl.ts` | Every `kubectl` invocation. Nothing else shells out. |
 | `src/model.ts` | Per-kind knowledge: columns, how a row is built, how health is judged. |
+| `src/metrics.ts` | CPU and memory from metrics-server, and the history behind the sparklines. |
 | `src/panel.ts` | The dashboard webview host — message handling, loading, caching. |
 | `src/tree.ts` | The contexts sidebar. |
 | `src/cache.ts` | The per-context payload cache that lets a reopened page paint instantly. |

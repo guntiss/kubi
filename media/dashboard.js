@@ -435,6 +435,14 @@
    * sorts numerically and null when it is plain text.
    */
   function sortValue(row, key) {
+    // Usage sorts on the reading itself; the cell's "512Mi" and "1.2Gi" are
+    // not comparable as text. A row with no reading sorts as the lowest.
+    const metric = metricColumn(key);
+    if (metric) {
+      if (!row.usage) return -1;
+      const reading = metricReading(row.usage, metric.metric);
+      return metric.share ? (reading.pct ?? -1) : reading.value;
+    }
     if (isAgeColumn(key) && row.created) {
       const time = new Date(row.created).getTime();
       // Older is larger, matching the seconds an age string parses to, so a
@@ -1319,9 +1327,7 @@
 
     const table = content.querySelector('table');
     if (!table) return false;
-    const columns = kind.columns.filter(
-      (c) => !(c.key === 'namespace' && state.namespace !== state.allNamespaces)
-    );
+    const columns = tableColumns(kind);
     const rows = visibleRows();
     if (!reconcileTable(table, rows, columns)) return false;
 
@@ -1447,7 +1453,9 @@
   function renderTableSkeleton() {
     const kind = kindOf(state.active);
     const columns = kind
-      ? kind.columns.filter((c) => !(c.key === 'namespace' && state.namespace !== state.allNamespaces))
+      // Usage columns are left out: whether they will appear depends on the
+      // rows, which are what the skeleton is standing in for.
+      ? kind.columns.filter((c) => !(c.key === 'namespace' && state.namespace !== state.allNamespaces) && !c.metric)
       : [{ label: 'Namespace' }, { label: 'Name' }, { label: 'Status' }, { label: 'Age' }];
 
     // Enough rows to fill a typical pane without implying a count: the skeleton
@@ -2079,6 +2087,8 @@
 
   function matchesTerm(row, term) {
     if (!term.key) return row.search.includes(term.value);
+    const metric = term.op ? metricColumn(term.key) : null;
+    if (metric) return compareMetric(row, metric, term.op, term.value);
     const cell = cellValue(row, term.key);
     return term.op
       ? compareCell(cell, term.op, term.value)
@@ -2108,6 +2118,289 @@
     });
   }
 
+  // ---------- usage metrics ----------
+
+  /**
+   * The columns the table draws for a kind. Namespace is redundant unless
+   * we're looking across all of them. The CPU and memory columns wait for a
+   * row that has a reading: without metrics-server they would be two empty
+   * columns on every row, and a stranger reading them could not tell "idle"
+   * from "not measured". A share column waits, likewise, for a row with a
+   * ceiling to measure against.
+   */
+  function tableColumns(kind) {
+    const measured = kind.columns.some((c) => c.metric) && state.rows.some((row) => row.usage);
+    const bounded = (metric) => state.rows.some((row) => row.usage && metricReading(row.usage, metric).ceiling);
+    return kind.columns.filter((c) =>
+      !(c.key === 'namespace' && state.namespace !== state.allNamespaces)
+      && (!c.metric || (measured && (!c.share || bounded(c.metric))))
+    );
+  }
+
+  /** The kind's column for a key, when it is one of the usage columns. */
+  function metricColumn(key) {
+    const column = kindOf(state.active)?.columns.find((c) => c.key === key);
+    return column && column.metric ? column : null;
+  }
+
+  /** Index of a metric's value in a sample: [offset, millicores, bytes]. */
+  const METRIC_FIELD = { cpu: 1, memory: 2 };
+
+  /** The cells metrics.ts writes; see `sameCells` for why they never flash a row. */
+  const METRIC_CELLS = new Set(['cpu', 'memory', 'cpuPct', 'memPct']);
+
+  /**
+   * The shortest span a sparkline's time axis covers. Right after the page
+   * opens there are one or two readings, and stretching them edge to edge
+   * would draw fifteen seconds as though it were the whole trend.
+   */
+  const MIN_SPAN_MS = 2 * 60 * 1000;
+
+  /**
+   * One time axis for every sparkline in the table, so a spike that hit
+   * several pods at once lines up down the column. Per-row axes would stretch
+   * a pod started a minute ago across the same width as one watched for ten,
+   * and the two would look alike.
+   *
+   * Memoised on the rows array, which is replaced wholesale on every fetch
+   * and nowhere else.
+   */
+  let domainMemo = { rows: null, domain: null };
+
+  function metricsDomain() {
+    if (domainMemo.rows === state.rows) return domainMemo.domain;
+    let from = Infinity;
+    let to = -Infinity;
+    for (const row of state.rows) {
+      if (!row.usage) continue;
+      if (row.usage.from < from) from = row.usage.from;
+      if (row.usage.to > to) to = row.usage.to;
+    }
+    const domain = to === -Infinity ? null : { from: Math.min(from, to - MIN_SPAN_MS), to };
+    domainMemo = { rows: state.rows, domain };
+    return domain;
+  }
+
+  /** The row's reading for one metric, measured against its ceiling where it has one. */
+  function metricReading(usage, key) {
+    const value = usage[key];
+    const ceiling = key === 'cpu' ? usage.cpuCeiling : usage.memoryCeiling;
+    const pct = ceiling ? value / ceiling : null;
+    // Memory at its limit is an OOM kill waiting to happen, and CPU at it is
+    // throttling; on a node, either is the scheduler running out of room.
+    const tone = pct === null ? '' : pct >= 0.9 ? 'bad' : pct >= 0.75 ? 'warn' : '';
+    return { value, ceiling, pct, tone };
+  }
+
+  function formatMetric(key, value) {
+    // An idle pod reads a fraction of a millicore, and "0m" would claim it
+    // uses nothing at all.
+    if (key === 'cpu') return value > 0 && value < 0.5 ? '<1m' : `${Math.round(value)}m`;
+    const mi = value / 1048576;
+    return mi >= 1024 ? `${(mi / 1024).toFixed(1)}Gi` : `${Math.round(mi)}Mi`;
+  }
+
+  /** Matches `formatShare` in metrics.ts, which writes the same text into the cells. */
+  function formatPct(pct) {
+    return pct === null ? '' : pct < 0.005 && pct > 0 ? '<1%' : `${Math.round(pct * 100)}%`;
+  }
+
+  /** What the ceiling is, in words, for tooltips and the details panel. */
+  function ceilingLabel(kindId, key, ceiling) {
+    if (!ceiling) return kindId === 'pods' ? 'no limit' : '';
+    return `${formatMetric(key, ceiling)} ${kindId === 'nodes' ? 'allocatable' : 'limit'}`;
+  }
+
+  /** "12m" to "4m": how long a span of readings covers, for the tooltips. */
+  function spanLabel(usage) {
+    const seconds = Math.round((usage.to - usage.from) / 1000);
+    return seconds >= 60 ? `${Math.round(seconds / 60)}m` : `${seconds}s`;
+  }
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  function svg(tag, attrs) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+    return node;
+  }
+
+  /**
+   * A line of one metric over the shared time axis, with a faint fill under
+   * it.
+   *
+   * The vertical scale runs to the ceiling where there is one, so a node at
+   * 30% sits a third of the way up and two nodes can be compared by eye. A pod
+   * with no limit has nothing to measure against, so its scale is its own peak
+   * — the shape of the trend is still right, but the height is not a level.
+   *
+   * The line breaks where readings are missing — every dashboard on the
+   * context was closed, or metrics-server stopped answering — rather than
+   * drawing a straight ramp across time nobody measured.
+   */
+  function sparkline(usage, key, domain, width, height, className) {
+    const field = METRIC_FIELD[key];
+    const { ceiling, tone } = metricReading(usage, key);
+    const points = usage.samples.map((s) => [usage.from + s[0] * 1000, s[field]]);
+    const peak = points.reduce((max, p) => Math.max(max, p[1]), 0);
+    const top = ceiling ? Math.max(ceiling, peak) : peak * 1.15 || 1;
+    const span = Math.max(1, domain.to - domain.from);
+    const pad = 1.5;
+    const x = (t) => ((t - domain.from) / span) * width;
+    const y = (v) => pad + (1 - v / top) * (height - pad * 2);
+
+    // A gap is anything well past the usual spacing between readings. The
+    // floor covers a metrics-server scraping once a minute, whose normal
+    // spacing would otherwise read as a gap at every step.
+    const steps = points.slice(1).map((p, i) => p[0] - points[i][0]).sort((a, b) => a - b);
+    const typical = steps.length ? steps[Math.floor(steps.length / 2)] : 0;
+    const gap = Math.max(150000, typical * 2.5);
+
+    const segments = [];
+    for (const point of points) {
+      const current = segments[segments.length - 1];
+      if (current && point[0] - current[current.length - 1][0] <= gap) {
+        current.push(point);
+      } else {
+        segments.push([point]);
+      }
+    }
+
+    const node = svg('svg', {
+      class: ['spark', className, tone].filter(Boolean).join(' '),
+      viewBox: `0 0 ${width} ${height}`,
+      preserveAspectRatio: 'none',
+      'aria-hidden': 'true'
+    });
+    for (const segment of segments) {
+      const coords = segment.map(([t, v]) => `${x(t).toFixed(1)},${y(v).toFixed(1)}`);
+      if (segment.length > 1) {
+        const first = x(segment[0][0]).toFixed(1);
+        const last = x(segment[segment.length - 1][0]).toFixed(1);
+        node.appendChild(svg('path', {
+          class: 'area',
+          d: `M${first},${height}L${coords.join('L')}L${last},${height}Z`
+        }));
+      }
+      // A lone reading is still drawn: as a dot, from a zero-length line with
+      // round caps, so the first poll after opening shows where things stand.
+      node.appendChild(svg('path', {
+        class: 'line',
+        d: segment.length > 1 ? `M${coords.join('L')}` : `M${coords[0]}h0.01`,
+        'vector-effect': 'non-scaling-stroke'
+      }));
+    }
+    return node;
+  }
+
+  /**
+   * Everything a metric cell draws depends on, as one string. Updating a row
+   * compares this instead of the DOM: nearly every poll brings new readings,
+   * but between metrics-server scrapes most do not, and redrawing a column of
+   * SVGs for nothing on each one is the cost this avoids.
+   */
+  function metricSignature(row, col, domain) {
+    const u = row.usage;
+    if (!u || !domain) return '';
+    const { value, ceiling } = metricReading(u, col.metric);
+    return col.share
+      ? [value, ceiling].join('|')
+      : [u.to, value, u.samples.length, ceiling, domain.from, domain.to].join('|');
+  }
+
+  /**
+   * The inside of a usage cell: a sparkline and the reading, or for a share
+   * column the percentage alone, coloured once it nears the ceiling.
+   */
+  function metricCellContent(row, col, domain) {
+    const u = row.usage;
+    if (!u || !domain) return [];
+    const reading = metricReading(u, col.metric);
+    const tone = reading.tone ? ' ' + reading.tone : '';
+    if (col.share) {
+      return reading.pct === null ? [] : [el('span', { class: 'metric-pct' + tone, text: formatPct(reading.pct) })];
+    }
+    return [
+      sparkline(u, col.metric, domain, 48, 16, ''),
+      el('span', { class: 'metric-value' + tone, text: formatMetric(col.metric, reading.value) })
+    ];
+  }
+
+  function metricTitle(row, col) {
+    const u = row.usage;
+    if (!u) return 'No reading from metrics-server';
+    const key = col.metric;
+    const { value, ceiling, pct } = metricReading(u, key);
+    const of = ceilingLabel(state.active, key, ceiling);
+    if (col.share) {
+      return ceiling ? `${formatMetric(key, value)} of ${of}` : of;
+    }
+    const peak = u.samples.reduce((max, s) => Math.max(max, s[METRIC_FIELD[key]]), 0);
+    return `${formatMetric(key, value)}${of ? ` of ${of}` : ''}${pct !== null ? ` (${formatPct(pct)})` : ''}`
+      + `\npeak ${formatMetric(key, peak)} over the last ${spanLabel(u)}`;
+  }
+
+  function buildMetricCell(row, col, classes, domain) {
+    return el('td', {
+      class: classes,
+      title: metricTitle(row, col),
+      'data-col': col.key,
+      'data-sig': metricSignature(row, col, domain)
+    }, ...metricCellContent(row, col, domain));
+  }
+
+  /** Redraws a metric cell in place, and only when what it shows has moved. */
+  function updateMetricCell(cell, row, col, domain) {
+    const sig = metricSignature(row, col, domain);
+    if (cell.getAttribute('data-sig') === sig) return;
+    cell.setAttribute('data-sig', sig);
+    cell.setAttribute('title', metricTitle(row, col));
+    cell.replaceChildren(...metricCellContent(row, col, domain));
+  }
+
+  /**
+   * A quantity typed into the filter — cpu:>500m, memory:>=1Gi — in the unit
+   * the row's usage is held in: millicores for CPU, bytes for memory. A bare
+   * CPU number is cores, as it is everywhere else in Kubernetes.
+   */
+  const QUANTITY_SUFFIXES = {
+    n: 1e-9, u: 1e-6, m: 1e-3, '': 1, k: 1e3, M: 1e6, G: 1e9, T: 1e12,
+    Ki: 1024, Mi: 1048576, Gi: 1073741824, Ti: 1099511627776
+  };
+
+  function parseQuantity(key, text) {
+    const match = /^(\d*\.?\d+)([a-zA-Z]*)$/.exec(text.trim());
+    if (!match || !(match[2] in QUANTITY_SUFFIXES)) return null;
+    const base = Number(match[1]) * QUANTITY_SUFFIXES[match[2]];
+    return key === 'cpu' ? base * 1000 : base;
+  }
+
+  /**
+   * A usage column compared against the filter: a quantity for the readings,
+   * a plain percentage (with or without the %) for the shares.
+   */
+  function compareMetric(row, col, op, text) {
+    const u = row.usage;
+    let left = null;
+    let right = null;
+    if (col.share) {
+      const pct = u ? metricReading(u, col.metric).pct : null;
+      left = pct === null ? null : pct * 100;
+      right = /^\d*\.?\d+%?$/.test(text.trim()) ? parseFloat(text) : null;
+    } else {
+      left = u ? u[col.metric] : null;
+      right = parseQuantity(col.metric, text);
+    }
+    if (left === null || right === null) return false;
+    switch (op) {
+      case '>': return left > right;
+      case '<': return left < right;
+      case '>=': return left >= right;
+      case '<=': return left <= right;
+      default: return left === right;
+    }
+  }
+
   function renderTable() {
     const kind = kindOf(state.active);
     if (!kind) return el('div', { class: 'state', text: 'Unknown resource.' });
@@ -2134,10 +2427,7 @@
           )
         : null;
 
-    // Namespace is redundant unless we're looking across all of them.
-    const columns = kind.columns.filter(
-      (c) => !(c.key === 'namespace' && state.namespace !== state.allNamespaces)
-    );
+    const columns = tableColumns(kind);
 
     // Ticking every visible row, or clearing them. Indeterminate whenever the
     // ticked rows are only some of what is on screen, so the header reads as a
@@ -2188,7 +2478,9 @@
             // the header survives refreshes now, so a flag captured when it was
             // built would describe an older sort than the one being toggled.
             const on = state.sort.key === col.key;
-            state.sort = on ? { key: col.key, dir: -state.sort.dir } : { key: col.key, dir: 1 };
+            // Usage is sorted to find the heaviest, so its first click puts
+            // the top consumers at the top.
+            state.sort = on ? { key: col.key, dir: -state.sort.dir } : { key: col.key, dir: col.metric ? -1 : 1 };
             renderContentOnly();
           }
         }, col.label, active ? el('span', { class: 'arrow', text: state.sort.dir > 0 ? ' ▲' : ' ▼' }) : null);
@@ -2308,6 +2600,9 @@
             return el('td', { class: classes, 'data-col': col.key },
               el('span', { class: 'pill ' + row.health }, value));
           }
+          if (col.metric) {
+            return buildMetricCell(row, col, classes + ' metric', metricsDomain());
+          }
           // An age cell carries the timestamp it was computed from, so the
           // ticker can rewrite it each second without a render — and without
           // the row's identity, which is what makes a cheap text swap safe.
@@ -2353,6 +2648,11 @@
    * a unit, which on a young object is every fetch. `created` is compared
    * above, and that is the only thing about an age that can actually move.
    *
+   * Usage is skipped for a different reason: it moves on nearly every poll,
+   * and a row that flashed each time metrics-server rescraped would drown out
+   * the changes the flash is there to catch. Metric cells are redrawn on
+   * their own; see `updateMetricCell`.
+   *
    * Only ever used to skip work, so it is deliberately conservative: an added
    * or removed key, or anything it doesn't know to compare, reads as different
    * and the cells are examined one by one as before.
@@ -2366,7 +2666,7 @@
     const keys = Object.keys(after);
     if (keys.length !== Object.keys(before).length) return false;
     for (const key of keys) {
-      if (isAgeColumn(key)) continue;
+      if (isAgeColumn(key) || METRIC_CELLS.has(key)) continue;
       if (before[key] !== after[key]) return false;
     }
     return true;
@@ -2572,6 +2872,14 @@
     // with would fight them, and it is the common case that it already agrees.
     if (live.check.checked !== ticked) live.check.checked = ticked;
 
+    // Ahead of the shortcut below, which only knows about `cells`: usage is
+    // left out of that comparison so it cannot flash the row, which means a
+    // row whose cells are unchanged can still have new readings to draw.
+    const domain = metricsDomain();
+    for (let i = 0; i < columns.length; i++) {
+      if (columns[i].metric) updateMetricCell(cells[i], row, columns[i], domain);
+    }
+
     // On a settled cluster almost every row comes back byte-identical, and the
     // cells were last written from `previous` — so if the values behind them
     // haven't moved, neither has anything on screen, and the per-cell reads
@@ -2586,6 +2894,7 @@
     for (let i = 0; i < columns.length; i++) {
       const col = columns[i];
       const cell = cells[i];
+      if (col.metric) continue;
       const value = cellValue(row, col.key);
 
       if (col.key === 'status') {
@@ -3116,8 +3425,12 @@
     const row = state.selected;
     const kind = kindOf(state.active);
     const entries = kind.columns
-      .filter((c) => c.key !== 'name' && cellValue(row, c.key) !== '')
+      .filter((c) => c.key !== 'name' && !c.metric && cellValue(row, c.key) !== '')
       .map((c) => [c.label, cellValue(row, c.key)]);
+    // The selection is a snapshot taken when the row was clicked, which is
+    // fine for its facts but not for usage: that moves on every poll, and the
+    // charts would sit frozen at the moment the panel opened.
+    const usage = currentRow(row)?.usage;
 
     const act = (action, container) => () => post(actionMessage(kind, row, action, container));
     const actions = objectActions(kind, row).map((a) => el('button', {
@@ -3174,11 +3487,58 @@
                 el('dt', { text: label }),
                 el('dd', {}, label === 'Status' ? el('span', { class: 'pill ' + row.health }, value) : value)
               ])),
-              renderContainers(row, act),
+              renderUsage(kind, usage),
+              renderContainers(row, act, usage),
               renderObjectEvents()
             ),
         el('div', { class: 'actions' }, ...actions)
       )
+    );
+  }
+
+  /** The latest version of a row, from the rows on screen; falls back to the one given. */
+  function currentRow(row) {
+    const key = rowKey(row);
+    return state.rows.find((r) => rowKey(r) === key) || row;
+  }
+
+  /**
+   * The Usage section of the details tab: the table's two sparklines, drawn
+   * large enough to read a trend off, each with its reading, its share of the
+   * ceiling and the range it moved through.
+   *
+   * Only kinds with metric columns get one, and only once there is a
+   * reading. A missing section is itself the explanation when metrics-server
+   * is absent; a heading over "no data" would just repeat it.
+   */
+  function renderUsage(kind, usage) {
+    if (!usage || !kind.columns.some((c) => c.metric)) return null;
+    const domain = { from: Math.min(usage.from, usage.to - MIN_SPAN_MS), to: usage.to };
+    const card = (key, label) => {
+      const reading = metricReading(usage, key);
+      const field = METRIC_FIELD[key];
+      const values = usage.samples.map((s) => s[field]);
+      const of = ceilingLabel(kind.id, key, reading.ceiling);
+      return el('div', { class: 'usage-card' },
+        el('div', { class: 'usage-head' },
+          el('span', { class: 'usage-label', text: label }),
+          el('span', { class: 'usage-value' + (reading.tone ? ' ' + reading.tone : ''), text: formatMetric(key, reading.value) }),
+          reading.pct !== null ? el('span', { class: 'usage-pct', text: formatPct(reading.pct) }) : null
+        ),
+        sparkline(usage, key, domain, 240, 44, 'large'),
+        el('div', { class: 'usage-foot' },
+          el('span', { text: reading.ceiling ? `of ${of}` : of }),
+          el('span', {
+            text: values.length > 1
+              ? `${formatMetric(key, Math.min(...values))} – ${formatMetric(key, Math.max(...values))} over ${spanLabel(usage)}`
+              : 'first reading'
+          })
+        )
+      );
+    };
+    return el('div', { class: 'usage' },
+      el('h3', {}, 'Usage'),
+      el('div', { class: 'usage-cards' }, card('cpu', 'CPU'), card('memory', 'Memory'))
     );
   }
 
@@ -3192,17 +3552,27 @@
    * order so init containers come first. The data rides along on the row, so
    * this paints with the panel and needs no fetch of its own.
    */
-  function renderContainers(row, act) {
+  function renderContainers(row, act, usage) {
     const containers = row.containers || [];
     if (!containers.length) return null;
 
     return el('div', { class: 'containers' },
       el('h3', {}, 'Containers', el('span', { class: 'count', text: String(containers.length) })),
-      ...containers.map((c) => renderContainer(c, act))
+      ...containers.map((c) => renderContainer(c, act, usage && usage.containers && usage.containers[c.name]))
     );
   }
 
-  function renderContainer(c, act) {
+  /**
+   * A container's CPU or memory line: what it is using now, then its request
+   * and limit. Either half can be missing — no reading for a container that
+   * is not running, no resources on one that never set any.
+   */
+  function containerResource(key, used, configured) {
+    const now = used ? `${formatMetric(key, used[key])} used` : '';
+    return [now, configured].filter(Boolean).join(' · ');
+  }
+
+  function renderContainer(c, act, used) {
     // The state pill says Running/Waiting/…; the reason beside it says which
     // CrashLoopBackOff or ImagePullBackOff, which is the part worth reading.
     const stateText = c.reason && c.reason !== c.state ? `${c.state} · ${c.reason}` : c.state;
@@ -3221,8 +3591,8 @@
       // its own, so it ticks with the table's age cells.
       ['Started', c.startedAt ? `${formatAge(c.startedAt)} ago` : '', formatTimestamp(c.startedAt), c.startedAt],
       ['Ports', c.ports],
-      ['CPU', c.cpu],
-      ['Memory', c.memory]
+      ['CPU', containerResource('cpu', used, c.cpu), c.cpu ? 'request / limit' : ''],
+      ['Memory', containerResource('memory', used, c.memory), c.memory ? 'request / limit' : '']
     ].filter(([, value]) => value !== '' && value !== undefined);
 
     // Shell needs a process to attach to, and an init container that has done

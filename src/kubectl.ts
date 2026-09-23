@@ -319,6 +319,42 @@ export async function list(
   return response.items ?? [];
 }
 
+/** One object's reading from metrics-server. Nodes carry `usage`; pods carry it per container. */
+export interface MetricsItem {
+  metadata: { name: string; namespace?: string };
+  /** The end of the window the reading was averaged over. */
+  timestamp?: string;
+  usage?: { cpu?: string; memory?: string };
+  containers?: { name: string; usage?: { cpu?: string; memory?: string } }[];
+}
+
+/**
+ * Current CPU and memory usage for every node or every pod, from the
+ * metrics.k8s.io API that metrics-server serves — the same numbers
+ * `kubectl top` prints.
+ *
+ * Read with `get --raw` rather than `kubectl top`, which only prints a table:
+ * rounded to whole millicores and Mi, and with no timestamp, which the history
+ * needs to tell a new reading from the same one polled twice.
+ *
+ * Bounded more tightly than a list: it runs beside the table's own fetch, and
+ * a metrics-server that is slow to answer must not hold the rows back for the
+ * full 30s. An unreachable or absent metrics API is the caller's to swallow.
+ */
+export async function metrics(
+  resource: 'nodes' | 'pods',
+  context: string,
+  signal?: AbortSignal
+): Promise<MetricsItem[]> {
+  const raw = await run(
+    ['get', '--raw', `/apis/metrics.k8s.io/v1beta1/${resource}`, '--request-timeout=8s'],
+    context,
+    10000,
+    signal
+  );
+  return (JSON.parse(raw) as ListResponse<MetricsItem>).items ?? [];
+}
+
 function scopeArgs(namespace?: string): string[] {
   return namespace && namespace !== ALL_NAMESPACES ? ['-n', namespace] : [];
 }

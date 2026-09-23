@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as vscode from 'vscode';
 import * as k from './kubectl';
 import { DashboardCache } from './cache';
+import { metricsFor } from './metrics';
 import { GROUPS, KINDS, Row, kindById, skew, toRow } from './model';
 
 /** Rail collapse is a global layout preference, shared by every context's panel. */
@@ -300,6 +301,12 @@ export class DashboardPanel {
     this.panel.webview.html = this.html();
 
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    // Usage history is polled per context while any dashboard is open on it,
+    // picking up from the rows an earlier session cached.
+    const metrics = metricsFor(contextName);
+    metrics.seed('nodes', this.cache.get(this.cacheKey('nodes'))?.payload);
+    metrics.seed('pods', this.cache.get(this.cacheKey('pods'))?.payload);
+    this.disposables.push(metrics.retain());
     this.panel.webview.onDidReceiveMessage((m: Inbound) => this.onMessage(m), null, this.disposables);
     // Polling pauses while the panel is unfocused, so coming back to it would
     // otherwise show rows as old as the time spent away until the next tick.
@@ -928,19 +935,27 @@ export class DashboardPanel {
     if (!kind) {
       return;
     }
+    const metrics = metricsFor(this.contextName);
     try {
-      const items = await k.list(
-        kind.id,
-        this.contextName,
-        kind.namespaced ? k.ALL_NAMESPACES : undefined,
-        signal
-      );
+      // Usage is read beside the list rather than after it, so the table waits
+      // for the slower of the two instead of their sum. The metrics half never
+      // fails the load, and costs nothing for kinds metrics-server does not
+      // report on; see `refresh`.
+      const [items] = await Promise.all([
+        k.list(
+          kind.id,
+          this.contextName,
+          kind.namespaced ? k.ALL_NAMESPACES : undefined,
+          signal
+        ),
+        metrics.refresh(kind.id)
+      ]);
       if (token !== this.loadToken) {
         return;
       }
       // A log is ordered by time; everything else reads as an inventory.
       const rows = items
-        .map((item) => toRow(kind.id, item))
+        .map((item) => metrics.decorate(kind.id, toRow(kind.id, item), item))
         .sort(kindId === 'events' ? byNewest : byNamespaceThenName);
       const generated = Date.now();
       this.cache.set(this.cacheKey(kindId), rows, generated);
@@ -996,9 +1011,15 @@ export class DashboardPanel {
    */
   private async loadOverview(token: number, signal: AbortSignal): Promise<void> {
     try {
+      // Pod usage is read here too, though the Overview draws none of it: the
+      // pod rows are cached for the Pods page below, and rows without usage
+      // would open that page with its CPU and memory columns missing until
+      // its own fetch put them back.
+      const metrics = metricsFor(this.contextName);
       const [items, podItems] = await Promise.all([
         k.list('events', this.contextName, k.ALL_NAMESPACES, signal),
-        k.list('pods', this.contextName, k.ALL_NAMESPACES, signal)
+        k.list('pods', this.contextName, k.ALL_NAMESPACES, signal),
+        metrics.refresh('pods')
       ]);
       if (token !== this.loadToken) {
         return;
@@ -1026,7 +1047,9 @@ export class DashboardPanel {
       // Every pod, built once. The whole list is what the Pods table shows, so
       // it is cached under that kind — the fetch has already been paid for, and
       // leaving it unsaved would have the Pods page repeat it.
-      const podRows = podItems.map((item) => toRow('pods', item)).sort(byNamespaceThenName);
+      const podRows = podItems
+        .map((item) => metrics.decorate('pods', toRow('pods', item), item))
+        .sort(byNamespaceThenName);
 
       // `muted` is a pod that finished its work — a completed Job's pod is not
       // a problem, and listing it here would bury the ones that are. `warn`

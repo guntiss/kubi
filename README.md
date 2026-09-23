@@ -73,6 +73,15 @@ agent with the whole thing in view.
   object, newest first. For a container that has restarted, **previous logs**
   reads the log of the instance that died — the one that explains the restart.
 
+- **CPU and memory** — Nodes and Pods show live usage with a sparkline of the
+  last ten minutes. Beside each, **CPU %** and **MEM %** give the usage as a
+  share of the pod's limits or the node's allocatable; they turn yellow at 75%
+  and red at 90%. The drawer draws
+  the same history larger, and breaks pod usage down per container. Needs
+  [metrics-server](https://github.com/kubernetes-sigs/metrics-server) in the
+  cluster; without it the columns simply do not appear. The history is what
+  the dashboard has seen since it opened, as metrics-server keeps none.
+
 Every kind is judged on what actually goes wrong with it: a Deployment past its
 progress deadline, an autoscaler that cannot read its metrics, a Service with no
 ready endpoints, a quota at its limit, a namespace stuck `Terminating`.
@@ -122,6 +131,8 @@ more than that:
 | `ns:kube-system` | `ns`, `n` and `s` are short for namespace, name, status |
 | `restarts:>3` | numbers compare — also `<`, `>=`, `<=`, `=` |
 | `age:<2h` | ages and ready ratios compare too: `age:>7d`, `ready:<1` |
+| `memory:>1Gi` | usage compares in quantities: `cpu:>500m`, `cpu:>=2` (cores) |
+| `memPct:>80` | share of limits or allocatable, in percent — also `cpuPct` |
 | `!running` | a leading `!` or minus excludes — also `-status:Running` |
 | `reason:"Back-off restarting"` | quote a value with spaces |
 | `ns:prod restarts:>0` | terms combine with AND |
@@ -181,8 +192,6 @@ and `npm run package` then fails.
   already on, without the drawer or the mouse.
 - **Custom resources** — opt in to the CRDs your cluster defines and get them
   in the rail beside the built-in kinds.
-- **Metrics server integration** — CPU and memory beside the resources they
-  belong to, for a fuller picture than status alone.
 - **More settings** — more of the defaults above made yours, per workspace.
 
 ## Status

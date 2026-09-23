@@ -9,6 +9,45 @@ export interface Column {
   secondary?: boolean;
   /** Right-align numeric-ish values. */
   numeric?: boolean;
+  /**
+   * Which reading from `Row.usage` the column draws: a sparkline and the
+   * value, or with `share` the value as a share of its ceiling. The webview
+   * hides these columns while no row has usage, so a cluster without
+   * metrics-server does not carry empty columns.
+   */
+  metric?: 'cpu' | 'memory';
+  /**
+   * With `metric`: the reading as a percentage of the node's allocatable or
+   * the pod's limits. Hidden while no row has that ceiling — a namespace
+   * where nothing sets limits would otherwise get a column of blanks.
+   */
+  share?: boolean;
+}
+
+/**
+ * Live CPU and memory for a node or pod, from metrics-server, with the recent
+ * history behind the table's sparkline. Attached by metrics.ts after `toRow`,
+ * and only to rows that had a reading.
+ */
+export interface Usage {
+  /** Millicores. */
+  cpu: number;
+  /** Bytes. */
+  memory: number;
+  /**
+   * What the reading is measured against: allocatable for a node, the summed
+   * limits for a pod. Absent when there is none — a pod with an unlimited
+   * container can use whatever the node has.
+   */
+  cpuCeiling?: number;
+  memoryCeiling?: number;
+  /** Time of the first and last sample, ms since epoch. */
+  from: number;
+  to: number;
+  /** Oldest first: [seconds after `from`, millicores, bytes]. */
+  samples: [number, number, number][];
+  /** Pods only: the latest reading per container, by name. */
+  containers?: Record<string, { cpu: number; memory: number }>;
 }
 
 /**
@@ -82,6 +121,8 @@ export interface Row {
    * pod -> ReplicaSet -> Deployment.
    */
   owner?: Owner;
+  /** Nodes and pods, when metrics-server answered; see `Usage`. */
+  usage?: Usage;
 }
 
 /** A `kind/name` pair from an ownerReference, within the object's namespace. */
@@ -128,6 +169,16 @@ export interface ResourceKind {
 }
 
 const AGE: Column = { key: 'age', label: 'Age', numeric: true };
+const CPU: Column = { key: 'cpu', label: 'CPU', numeric: true, metric: 'cpu' };
+const MEMORY: Column = { key: 'memory', label: 'Memory', numeric: true, metric: 'memory' };
+/**
+ * Usage as a share of the ceiling, beside the reading it is a share of: a
+ * pod's limits, or what the scheduler can allocate on a node. The labels are
+ * kept short because the table is already wide; the cell's tooltip says which
+ * ceiling it is. Keys are shared by both kinds so one filter works on either.
+ */
+const share = (metric: 'cpu' | 'memory', label: string): Column =>
+  ({ key: metric === 'cpu' ? 'cpuPct' : 'memPct', label, numeric: true, metric, share: true });
 const NAME: Column = { key: 'name', label: 'Name' };
 const NAMESPACE: Column = { key: 'namespace', label: 'Namespace' };
 
@@ -142,6 +193,10 @@ const DECLARED_KINDS: ResourceKind[] = [
     columns: [
       { key: 'name', label: 'Name' },
       { key: 'status', label: 'Status' },
+      CPU,
+      share('cpu', 'CPU %'),
+      MEMORY,
+      share('memory', 'MEM %'),
       { key: 'roles', label: 'Roles', secondary: true },
       { key: 'version', label: 'Version', secondary: true },
       { key: 'internalIP', label: 'Internal IP', secondary: true },
@@ -161,6 +216,10 @@ const DECLARED_KINDS: ResourceKind[] = [
       { key: 'status', label: 'Status' },
       { key: 'ready', label: 'Ready', numeric: true },
       { key: 'restarts', label: 'Restarts', numeric: true },
+      CPU,
+      share('cpu', 'CPU %'),
+      MEMORY,
+      share('memory', 'MEM %'),
       { key: 'node', label: 'Node', secondary: true },
       AGE
     ]

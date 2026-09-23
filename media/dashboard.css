@@ -843,6 +843,70 @@ tr.selected .pill { background: rgba(255,255,255,0.18); }
 .modal dt { color: var(--muted); font-size: 0.9em; }
 .modal dd { margin: 0; word-break: break-word; font-size: 0.92em; }
 
+/* ---------- usage: CPU and memory sparklines ---------- */
+
+/*
+ * The line takes the chart colour VS Code already uses for a neutral series,
+ * and only turns yellow or red once the reading nears its ceiling — so a
+ * column of sparklines stays quiet until one of them is worth reading.
+ */
+.spark { display: block; flex: none; color: var(--vscode-charts-blue, #4a9eff); overflow: visible; }
+.spark.warn { color: var(--warn); }
+.spark.bad { color: var(--bad); }
+.spark .line { fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linejoin: round; stroke-linecap: round; }
+.spark .area { fill: currentColor; opacity: 0.16; stroke: none; }
+.spark.large .line { stroke-width: 1.5; }
+
+td.metric > * { vertical-align: middle; }
+td.metric .spark {
+  display: inline-block;
+  width: 48px;
+  height: 16px;
+  margin-right: 8px;
+}
+/* The reading has a fixed width too, so the sparklines beside it line up down
+   the column instead of shifting with each number's length. */
+td.metric .metric-value { display: inline-block; min-width: 5ch; }
+td.metric .metric-value.warn { color: var(--warn); }
+td.metric .metric-value.bad { color: var(--bad); font-weight: 600; }
+td.metric .metric-pct.warn { color: var(--warn); }
+td.metric .metric-pct.bad { color: var(--bad); font-weight: 600; }
+
+.usage { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.usage h3 {
+  margin: 0 0 8px;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--muted);
+}
+.usage-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.usage-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 11px 8px;
+  min-width: 0;
+}
+.usage-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.usage-label { color: var(--muted); font-size: 0.88em; flex: 1; }
+.usage-value { font-size: 1.15em; font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-value.warn { color: var(--warn); }
+.usage-value.bad { color: var(--bad); }
+.usage-pct { color: var(--muted); font-size: 0.88em; font-variant-numeric: tabular-nums; }
+.usage-card .spark { width: 100%; height: 44px; }
+.usage-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.8em;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- containers, inside the pod details modal ---------- */
 
 .containers { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
