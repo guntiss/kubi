@@ -7,48 +7,57 @@
 
 **Manage Kubernetes clusters in VS Code at lightning speed.**
 
-To get started just type in your terminal: `code --install-extension guntiss.kubi`
+To get started, run this in your terminal: `code --install-extension guntiss.kubi`
 
 ## A look around
 
 | | |
 | --- | --- |
-| <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/demo.gif"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/demo.gif" width="400" alt="Kubi in action: browsing a cluster, filtering resources and opening a pod's detail drawer"></a><br>**Demo** — browsing, filtering and inspecting a cluster. | <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/overview.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/overview.png" width="400" alt="The Overview, leading with unhealthy pods and warning events"></a><br>**Overview** — unhealthy pods and Warning events at a glance. |
-| <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/pods.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/pods.png" width="400" alt="The Pods table, with status pills and problem rows highlighted"></a><br>**Resource tables** — status pills, problem rows highlighted. | <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/details.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/details.png" width="400" alt="The detail drawer for a failing pod, with its container state, the pull error and its events"></a><br>**Detail drawer** — container state, errors and events. |
-| <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/filters.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/filters.png" width="400" alt="Deployments narrowed to one namespace and the Problems bucket"></a><br>**Filtering** — namespace, status bucket and query, combined. | <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/about.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/about.png" width="400" alt="The About page: version skew, authenticated identity, connection and plugins"></a><br>**About** — version skew, identity, connection, plugins. |
+| <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/overview.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/overview.png" width="400" alt="The Overview, leading with unhealthy pods and Warning events grouped by reason"></a><br>**Overview** — unhealthy pods and Warning events at a glance. | <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/nodes.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/nodes.png" width="400" alt="The Nodes table with CPU and memory sparklines, and a node's right-click menu"></a><br>**Resource tables** — live usage, right-click actions. |
+| <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/node-details.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/node-details.png" width="400" alt="The detail drawer for a node, with its CPU and memory history and its events"></a><br>**Detail drawer** — usage history, events and actions. | <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/describe.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/describe.png" width="400" alt="The Describe tab of a deployment's drawer, with kubectl describe output highlighted"></a><br>**Describe** — highlighted `kubectl describe` in the drawer. |
+| <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/shell-terminal.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/shell-terminal.png" width="400" alt="A pod's logs and a shell open side by side in VS Code's terminal"></a><br>**Logs and shell** — right in VS Code's terminal. | <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/delete.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/delete.png" width="400" alt="Four selected pods and the confirmation dialog for deleting them"></a><br>**Bulk actions** — select rows, act on them at once. |
 
 ## Why Kubi
 
-**Works out of the box.** All you need is VS Code, `kubectl` with your existing kubeconfig, cloud SSO works out-of-the-box.
+**Works out of the box.** All you need is VS Code and `kubectl` with your
+existing kubeconfig. Cloud SSO works too.
 
-**It feels super fast.** Every view is cache-first, refreshes never clears the screen, steal
-focus or block the UI - continue navigating, filtering while refresh happens in the background.
-Everything is optimized for maximum speed and performance, filtering happens client side so it's always instant.
+**Shallow learning curve.** The friendly UI makes Kubi quick to learn and
+master. Right-click context menus let you navigate quickly without memorizing
+keyboard shortcuts.
 
-**Notice issues faster** Human friendly overview page allows seeing cluster issues at a glance, without the need to dig through each page.
+**It feels super fast.** Every view is cache-first, and refreshes never clear
+the screen, steal focus or block the UI — keep navigating and filtering while
+the refresh happens in the background. Everything is optimized for speed, and
+filtering happens client-side, so it is always instant.
 
-**Work with many clusters simultaneously.** Each context opens in its own editor tab,
-switch at any time. Every call passes `--context` explicitly and your kubeconfig
-is never modified. You can even set custom kubeconfig path for each workspace.
-Each window remembers it's state even after window reload - continue where you left off.
+**Notice issues faster.** A human-friendly overview page shows cluster issues at
+a glance, without the need to dig through each page.
 
-**Utilize native VS Code terminal and file editing capabilities.** Quickly check logs
-for current or terminated container; open shell for command execution — native VS Code
-terminal allows to quickly edit command, add a `grep`, or even pipe output file on the fly.
-Also editing Kubenretes resources is a breeze since it happens right in the IDE - syntax highlighting, formatting, etc.
+**Work with many clusters simultaneously.** Each context opens in its own editor
+tab, and you can switch between them at any time. Every call passes `--context`
+explicitly, and your kubeconfig is never modified. You can even set a custom
+kubeconfig path for each workspace. Each window remembers its state even after
+a reload, so you can continue where you left off.
 
-**The codebase is small and lightweight.** Around 4,000 lines of TypeScript across six files,
-with no runtime dependencies and no build step beyond `tsc`.  It is easy to read
-end to end, easy to submit a change to, and small enough to hand to a coding
-agent with the whole thing in view.
+**Use VS Code's native terminal and editor.** Quickly check logs for the current
+or a terminated container, or open a shell to run commands. The native VS Code
+terminal lets you quickly edit a command, add a `grep`, or even pipe the output
+to a file on the fly. Editing Kubernetes resources is a breeze too, since it
+happens right in the IDE, with syntax highlighting, formatting and the rest.
+
+**The codebase is small and lightweight.** Around 5,000 lines of TypeScript
+across seven files, with no runtime dependencies and no build step beyond `tsc`.
+It is easy to read end to end, easy to submit a change to, and small enough to
+hand to a coding agent with the whole thing in view.
 
 ## Main features
 
 **Dashboard — one editor tab per context.** Inside a dashboard:
 
 - **Overview** — unhealthy pods and every Warning event the cluster is holding,
-  grouped by reason. A cluster whose event TTL has expired everything says so
-  rather than claiming all is well.
+  grouped by reason. A cluster whose events have all expired past their TTL says
+  so rather than claiming all is well.
 
 - **Resource tables** — sortable, filterable tables with columns matched to each
   kind, and status pills colored by health. The rail groups them:
@@ -74,9 +83,9 @@ agent with the whole thing in view.
   reads the log of the instance that died — the one that explains the restart.
 
 - **CPU and memory** — Nodes and Pods show live usage with a sparkline of the
-  last ten minutes, once a full ten minutes has been recorded. Beside each, **CPU %** and **MEM %** give the usage as a
-  share of the pod's limits or the node's allocatable; they turn yellow at 75%
-  and red at 90%. The drawer draws
+  last ten minutes, once a full ten minutes has been recorded. Beside each,
+  **CPU %** and **MEM %** give the usage as a share of the pod's limits or the
+  node's allocatable; they turn yellow at 75% and red at 90%. The drawer draws
   the same history larger, and breaks pod usage down per container. Needs
   [metrics-server](https://github.com/kubernetes-sigs/metrics-server) in the
   cluster; without it the columns simply do not appear. The history is what
@@ -138,7 +147,7 @@ more than that:
 | `ns:prod restarts:>0` | terms combine with AND |
 
 Field names are the kind's own column keys, plus `name`, `namespace` and
-`status` on every kind. An unrecognised field is treated as plain text, so a name
+`status` on every kind. An unrecognized field is treated as plain text, so a name
 containing a colon still finds itself. Press `/` or `Ctrl`/`Cmd`+`F` to jump to
 the box.
 
@@ -187,12 +196,14 @@ and `npm run package` then fails.
 | `kubi.preserveCacheAfterUpdates` | `true` | Keep cached dashboard data when the extension updates, so the first dashboard opened after an update paints immediately. Turn it off if you would rather each update start empty: a view cached by an older build can paint blank cells until its first refresh replaces it. Also on the About page. |
 
 ## Roadmap
-- **Support for all standard kubernetes resources** - some are still missing
+
+- **All standard Kubernetes resources** — some are still missing.
 - **More keyboard shortcuts** — reach the common actions from the row you are
   already on, without the drawer or the mouse.
 - **Custom resources** — opt in to the CRDs your cluster defines and get them
   in the rail beside the built-in kinds.
 - **More settings** — more of the defaults above made yours, per workspace.
+- **Refactor filtering** - UI improvements
 
 ## Status
 
