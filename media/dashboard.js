@@ -452,9 +452,38 @@
     return numericValue(cellValue(row, key));
   }
 
+  /**
+   * The status pill. A pod being deleted reads "Terminating (13s/30s)",
+   * counting up from the deletion request against its grace period, after
+   * which the kubelet kills it; the ticker keeps the count moving through the
+   * same data-age-* attributes an age cell uses.
+   */
+  function statusPill(row, text) {
+    if (!row.terminating) return el('span', { class: 'pill ' + row.health, text });
+    return el('span', {
+      class: 'pill ' + row.health,
+      title: 'Deletion requested ' + formatTimestamp(row.terminating),
+      'data-age-from': row.terminating,
+      'data-age-prefix': text + ' (',
+      'data-age-suffix': terminatingSuffix(row)
+    }, statusPillText(row, text));
+  }
+
+  function statusPillText(row, text) {
+    return row.terminating ? `${text} (${formatAge(row.terminating)}${terminatingSuffix(row)}` : text;
+  }
+
+  function terminatingSuffix(row) {
+    return row.terminatingGrace ? `/${formatSeconds(row.terminatingGrace)})` : ')';
+  }
+
   /** Formats an age the way kubectl does: 2y271d, 5d, 3h, 12m, 45s. */
   function formatAge(timestamp) {
-    const seconds = Math.max(0, Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000));
+    return formatSeconds((Date.now() - new Date(timestamp).getTime()) / 1000);
+  }
+
+  function formatSeconds(span) {
+    const seconds = Math.max(0, Math.floor(span));
     const days = Math.floor(seconds / 86400);
     if (days >= 365) return `${Math.floor(days / 365)}y${days % 365}d`;
     if (days > 0) return `${days}d`;
@@ -1621,7 +1650,7 @@
       title: 'Open in Pods',
       onclick: () => openPod(row)
     },
-      el('span', { class: 'pill ' + row.health, text: row.cells.status || row.status }),
+      statusPill(row, row.cells.status || row.status),
       el('span', { class: 'ov-pod-name' },
         row.namespace ? el('span', { class: 'ov-ns', text: row.namespace }) : null,
         el('span', { class: 'ov-object', text: row.name })
@@ -2597,8 +2626,7 @@
             col.key === 'message' ? 'message' : ''
           ].filter(Boolean).join(' ');
           if (col.key === 'status') {
-            return el('td', { class: classes, 'data-col': col.key },
-              el('span', { class: 'pill ' + row.health }, value));
+            return el('td', { class: classes, 'data-col': col.key }, statusPill(row, value));
           }
           if (col.metric) {
             return buildMetricCell(row, col, classes + ' metric', metricsDomain());
@@ -2659,6 +2687,7 @@
    */
   function sameCells(a, b) {
     if (a.health !== b.health || a.created !== b.created) return false;
+    if (a.terminating !== b.terminating || a.terminatingGrace !== b.terminatingGrace) return false;
     const before = a.cells;
     const after = b.cells;
     if (before === after) return true;
@@ -2902,7 +2931,15 @@
         if (!pill) return false;
         const pillClass = 'pill ' + row.health;
         if (pill.className !== pillClass) pill.className = pillClass;
-        if (pill.textContent !== String(value)) pill.textContent = value;
+        if ((pill.getAttribute('data-age-from') ?? undefined) !== row.terminating
+          || (row.terminating && pill.getAttribute('data-age-suffix') !== terminatingSuffix(row))) {
+          // Started or stopped terminating: swap the pill rather than juggle
+          // the ticker's attributes one by one.
+          cell.replaceChild(statusPill(row, value), pill);
+          continue;
+        }
+        const text = statusPillText(row, String(value));
+        if (pill.textContent !== text) pill.textContent = text;
         continue;
       }
 
@@ -4358,7 +4395,8 @@
     for (const cell of app.querySelectorAll('[data-age-from]')) {
       // A table cell reads "5m"; a detail line reads "5m ago". The suffix rides
       // along on the element so the ticker doesn't have to know which is which.
-      const next = formatAge(cell.getAttribute('data-age-from'))
+      const next = (cell.getAttribute('data-age-prefix') ?? '')
+        + formatAge(cell.getAttribute('data-age-from'))
         + (cell.getAttribute('data-age-suffix') ?? '');
       if (cell.textContent !== next) {
         cell.textContent = next;

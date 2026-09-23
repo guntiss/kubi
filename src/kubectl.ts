@@ -123,6 +123,7 @@ export interface KubeObject {
     uid?: string;
     creationTimestamp?: string;
     deletionTimestamp?: string;
+    deletionGracePeriodSeconds?: number;
     labels?: Record<string, string>;
     annotations?: Record<string, string>;
     ownerReferences?: { kind?: string; name?: string; controller?: boolean }[];

@@ -115,6 +115,13 @@ export interface Row {
   /** Nodes only: `spec.unschedulable`, so the menu can offer Cordon or Uncordon. */
   unschedulable?: boolean;
   /**
+   * Pods being deleted only: when the deletion was requested, so the webview
+   * can count up "Terminating (13s)" live instead of showing a bare word.
+   */
+  terminating?: string;
+  /** Alongside `terminating`: the grace period in seconds, shown as "12s/30s". */
+  terminatingGrace?: number;
+  /**
    * The controller that created this object; see `ownerOf`. Carried on every
    * kind that has one so a row can be matched to its owner without another
    * fetch: it is what scoping the pod table to a Deployment resolves through,
@@ -608,6 +615,8 @@ export function toRow(kindId: string, object: k.KubeObject): Row {
     ...(built.containers ? { containers: built.containers } : {}),
     ...(built.replicas !== undefined ? { replicas: built.replicas } : {}),
     ...(built.unschedulable ? { unschedulable: true } : {}),
+    ...(built.terminating ? { terminating: built.terminating } : {}),
+    ...(built.terminatingGrace ? { terminatingGrace: built.terminatingGrace } : {}),
     ...(owner ? { owner } : {}),
     ...(object.metadata.uid ? { uid: object.metadata.uid } : {})
   };
@@ -634,6 +643,8 @@ interface Built {
   containers?: ContainerInfo[];
   replicas?: number;
   unschedulable?: boolean;
+  terminating?: string;
+  terminatingGrace?: number;
 }
 
 function build(kindId: string, object: k.KubeObject): Built {
@@ -689,6 +700,19 @@ function build(kindId: string, object: k.KubeObject): Built {
   }
 }
 
+/**
+ * When a pod's deletion was asked for. `deletionTimestamp` is not that: the
+ * API server sets it to the request time plus the grace period, the moment the
+ * kubelet may kill the pod, so it sits in the future for the whole graceful
+ * shutdown. Taking the grace period back off recovers the request time.
+ */
+function deletionRequested(pod: k.KubeObject): string | undefined {
+  const deadline = new Date(pod.metadata.deletionTimestamp ?? '').getTime();
+  if (Number.isNaN(deadline)) return undefined;
+  const grace = pod.metadata.deletionGracePeriodSeconds ?? 0;
+  return new Date(deadline - grace * 1000).toISOString();
+}
+
 function buildPod(pod: k.KubeObject): Built {
   const statuses: any[] = pod.status?.containerStatuses ?? [];
   const ready = statuses.filter((c) => c.ready).length;
@@ -701,8 +725,10 @@ function buildPod(pod: k.KubeObject): Built {
     'Unknown';
   // A pod being deleted keeps `phase: Running` until its containers stop; the
   // deletion timestamp is the only sign, so mirror kubectl and say so.
+  let terminating: string | undefined;
   if (pod.metadata.deletionTimestamp) {
     reason = pod.status?.reason === 'NodeLost' ? 'Unknown' : 'Terminating';
+    if (reason === 'Terminating') terminating = deletionRequested(pod);
   }
 
   const allReady = statuses.length > 0 && ready === statuses.length;
@@ -719,6 +745,10 @@ function buildPod(pod: k.KubeObject): Built {
     health,
     status: reason,
     containers: buildContainers(pod),
+    ...(terminating ? { terminating } : {}),
+    ...(terminating && pod.metadata.deletionGracePeriodSeconds
+      ? { terminatingGrace: pod.metadata.deletionGracePeriodSeconds }
+      : {}),
     cells: {
       status: reason,
       ready: `${ready}/${statuses.length}`,
