@@ -1143,19 +1143,23 @@
 
     children.push(el('span', { class: 'spacer' }));
 
-    if (state.refreshError) {
-      children.push(el('span', {
-        class: 'refresh-error',
-        title: state.refreshError,
-        text: 'Refresh failed'
-      }));
-    }
+    const refreshError = renderRefreshError();
+    if (refreshError) children.push(refreshError);
 
     children.push(renderFreshness());
     children.push(renderRefresh());
     // The filter row below draws its own separator, so the toolbar drops its
     // rule rather than stacking two lines a few pixels apart.
     return el('div', { class: 'toolbar' + (showFilters() ? ' with-filters' : '') }, ...children);
+  }
+
+  function renderRefreshError() {
+    if (!state.refreshError) return null;
+    return el('span', {
+      class: 'refresh-error',
+      title: state.refreshError,
+      text: 'Refresh failed'
+    });
   }
 
   /**
@@ -1245,6 +1249,14 @@
       render();
       return;
     }
+    // The failure note sits just before the label and comes and goes with the
+    // same payloads: a background refresh that succeeds has to take it away
+    // without the full render a manual refresh gets.
+    const oldError = app.querySelector('.toolbar .refresh-error');
+    const newError = renderRefreshError();
+    if (oldError && newError) oldError.replaceWith(newError);
+    else if (oldError) oldError.remove();
+    else if (newError) app.querySelector('.toolbar .freshness').before(newError);
     const slot = app.querySelector('.toolbar .refresh-slot');
     if (slot) slot.replaceWith(renderRefresh());
   }
