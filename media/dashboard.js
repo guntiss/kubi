@@ -2873,6 +2873,9 @@
     return navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
   }
 
+  /** The workload kinds `kubectl logs` and `kubectl exec` accept as `Kind/name`. */
+  const WORKLOAD_TERMINALS = ['deployments', 'statefulsets', 'daemonsets', 'replicasets'];
+
   /** The message that asks the extension to run `action` on one object. */
   function actionMessage(kind, row, action, container) {
     return {
@@ -2927,6 +2930,16 @@
           ? 'Show only the pods running on this node'
           : `Show only the pods of this ${kind.singular.toLowerCase()}`
       });
+    }
+    // A workload's logs and shell, through kubectl's own `Kind/name` form:
+    // kubectl picks one of its pods, and the pod's default container, and
+    // names both in the terminal. Drilling into Pods is the way to choose.
+    if (WORKLOAD_TERMINALS.includes(kind.id)) {
+      const target = `${kind.singular.toLowerCase()}/${row.name}`;
+      actions.push(
+        { label: 'Logs', run: act('logs'), title: `kubectl logs -f --tail 100 ${target}, in a terminal` },
+        { label: 'Shell', run: act('shell'), title: `kubectl exec -it ${target}, in a terminal` }
+      );
     }
     // Node maintenance. Only the one of Cordon and Uncordon that would change
     // something is offered; Drain cordons on its own, so it is there either way.

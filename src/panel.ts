@@ -1273,17 +1273,17 @@ export class DashboardPanel {
         }
         case 'logs':
           if (namespace) {
-            openLogs(name, ctx, namespace, message.container);
+            openLogs(terminalTarget(kind, name), ctx, namespace, message.container);
           }
           break;
         case 'logs-previous':
           if (namespace) {
-            openLogs(name, ctx, namespace, message.container, true);
+            openLogs(terminalTarget(kind, name), ctx, namespace, message.container, true);
           }
           break;
         case 'shell':
           if (namespace) {
-            openShell(name, ctx, namespace, message.container);
+            openShell(terminalTarget(kind, name), ctx, namespace, message.container);
           }
           break;
         case 'scale': {
@@ -1708,6 +1708,18 @@ function byNewest(a: Row, b: Row): number {
 function time(timestamp?: string): number {
   const ms = timestamp ? new Date(timestamp).getTime() : NaN;
   return Number.isNaN(ms) ? 0 : ms;
+}
+
+/** The workload kinds `kubectl logs` and `kubectl exec` accept as `kind/name`. */
+const WORKLOAD_TERMINALS = new Set(['deployments', 'statefulsets', 'daemonsets', 'replicasets']);
+
+/**
+ * What logs and shell point kubectl at: a pod by its name, or a workload as
+ * `kind/name`, for which kubectl picks one of its pods.
+ */
+function terminalTarget(kind: string, name: string): string {
+  const meta = kindById(kind);
+  return meta && WORKLOAD_TERMINALS.has(kind) ? `${meta.singular.toLowerCase()}/${name}` : name;
 }
 
 /**
