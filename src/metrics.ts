@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as k from './kubectl';
-import { Row, Usage } from './model';
+import { PartialCeiling, Row, Usage } from './model';
 
 /**
  * CPU and memory usage from metrics-server, and the short history behind the
@@ -265,7 +265,7 @@ class ContextMetrics {
       return row;
     }
     const [, cpu, memory] = samples[samples.length - 1];
-    const ceiling = kind === 'nodes' ? nodeCeiling(object) : podCeiling(object);
+    const ceiling = kind === 'nodes' ? nodeCeiling(object) : podCeiling(object, this.containers.get(key));
     const from = samples[0][0];
     const usage: Usage = {
       cpu,
@@ -285,8 +285,10 @@ class ContextMetrics {
         ...row.cells,
         cpu: formatCpu(cpu),
         memory: formatMemory(memory),
-        ...(usage.cpuCeiling ? { cpuPct: formatShare(cpu / usage.cpuCeiling) } : {}),
-        ...(usage.memoryCeiling ? { memPct: formatShare(memory / usage.memoryCeiling) } : {})
+        ...(usage.cpuCeiling ? { cpuPct: formatShare((usage.cpuPartial?.used ?? cpu) / usage.cpuCeiling) } : {}),
+        ...(usage.memoryCeiling
+          ? { memPct: formatShare((usage.memoryPartial?.used ?? memory) / usage.memoryCeiling) }
+          : {})
       }
     };
   }
@@ -331,27 +333,44 @@ function nodeCeiling(node: k.KubeObject): Pick<Usage, 'cpuCeiling' | 'memoryCeil
   };
 }
 
+type PodCeiling = Pick<Usage, 'cpuCeiling' | 'memoryCeiling' | 'cpuPartial' | 'memoryPartial'>;
+
 /**
  * A pod's limits, summed over the containers that are running for its life:
  * the ordinary ones and native sidecars (init containers with `restartPolicy:
- * Always`). A limit is only a ceiling if every one of them has it — a single
- * unlimited container makes the pod unlimited — so a partial sum is dropped
- * rather than reported as a number the pod can in fact exceed.
+ * Always`).
+ *
+ * When only some of them set a limit, the ceiling is the sum of those that
+ * do, measured against their usage alone. Counting an unlimited sidecar's
+ * usage against the app's limit would show pressure that is not there, and
+ * dropping the ceiling altogether, the pod as a whole being unbounded, would
+ * blank the column for nearly every pod that runs a sidecar. That needs the
+ * per-container readings; without them a partial ceiling is left out.
  */
-function podCeiling(pod: k.KubeObject): Pick<Usage, 'cpuCeiling' | 'memoryCeiling'> {
+function podCeiling(pod: k.KubeObject, used: Record<string, ContainerUsage> | undefined): PodCeiling {
   const running: any[] = [
     ...(pod.spec?.containers ?? []),
     ...(pod.spec?.initContainers ?? []).filter((c: any) => c.restartPolicy === 'Always')
   ];
-  const sum = (key: 'cpu' | 'memory', parse: (q: string) => number): number | undefined => {
-    if (!running.length || running.some((c) => !c.resources?.limits?.[key])) return undefined;
-    return running.reduce((total, c) => total + parse(c.resources.limits[key]), 0);
+  const measure = (key: 'cpu' | 'memory', parse: (q: string) => number) => {
+    const limited = running.filter((c) => c.resources?.limits?.[key]);
+    if (!limited.length) return {};
+    const ceiling = limited.reduce((total, c) => total + parse(c.resources.limits[key]), 0);
+    if (limited.length === running.length) return { ceiling };
+    if (!used) return {};
+    const partial: PartialCeiling = {
+      used: limited.reduce((total, c) => total + (used[c.name]?.[key] ?? 0), 0),
+      unlimited: running.filter((c) => !limited.includes(c)).map((c) => c.name)
+    };
+    return { ceiling, partial };
   };
-  const cpu = sum('cpu', cpuMillis);
-  const memory = sum('memory', bytes);
+  const cpu = measure('cpu', cpuMillis);
+  const memory = measure('memory', bytes);
   return {
-    ...(cpu !== undefined ? { cpuCeiling: cpu } : {}),
-    ...(memory !== undefined ? { memoryCeiling: memory } : {})
+    ...(cpu.ceiling !== undefined ? { cpuCeiling: cpu.ceiling } : {}),
+    ...(cpu.partial ? { cpuPartial: cpu.partial } : {}),
+    ...(memory.ceiling !== undefined ? { memoryCeiling: memory.ceiling } : {}),
+    ...(memory.partial ? { memoryPartial: memory.partial } : {})
   };
 }
 

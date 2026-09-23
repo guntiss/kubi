@@ -24,6 +24,14 @@ export interface Column {
   share?: boolean;
 }
 
+/** The part of a pod's reading that its partial ceiling is measured against. */
+export interface PartialCeiling {
+  /** Usage of the containers that set the limit: millicores or bytes. */
+  used: number;
+  /** The containers left out, which set no limit. */
+  unlimited: string[];
+}
+
 /**
  * Live CPU and memory for a node or pod, from metrics-server, with the recent
  * history behind the table's sparkline. Attached by metrics.ts after `toRow`,
@@ -41,6 +49,13 @@ export interface Usage {
    */
   cpuCeiling?: number;
   memoryCeiling?: number;
+  /**
+   * Pods where some containers set the limit and others do not, most often an
+   * app beside a sidecar left unlimited. The ceiling then sums the limited
+   * containers alone, and the share is their usage against it.
+   */
+  cpuPartial?: PartialCeiling;
+  memoryPartial?: PartialCeiling;
   /** Time of the first and last sample, ms since epoch. */
   from: number;
   to: number;

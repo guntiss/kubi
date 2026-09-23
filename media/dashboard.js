@@ -2210,15 +2210,20 @@
     return domain;
   }
 
-  /** The row's reading for one metric, measured against its ceiling where it has one. */
+  /**
+   * The row's reading for one metric, measured against its ceiling where it
+   * has one. On a pod where only some containers set the limit, `partial`
+   * holds those containers' usage, which is what the share is of.
+   */
   function metricReading(usage, key) {
     const value = usage[key];
     const ceiling = key === 'cpu' ? usage.cpuCeiling : usage.memoryCeiling;
-    const pct = ceiling ? value / ceiling : null;
+    const partial = (key === 'cpu' ? usage.cpuPartial : usage.memoryPartial) || null;
+    const pct = ceiling ? (partial ? partial.used : value) / ceiling : null;
     // Memory at its limit is an OOM kill waiting to happen, and CPU at it is
     // throttling; on a node, either is the scheduler running out of room.
     const tone = pct === null ? '' : pct >= 0.9 ? 'bad' : pct >= 0.75 ? 'warn' : '';
-    return { value, ceiling, pct, tone };
+    return { value, ceiling, partial, pct, tone };
   }
 
   function formatMetric(key, value) {
@@ -2238,6 +2243,18 @@
   function ceilingLabel(kindId, key, ceiling) {
     if (!ceiling) return kindId === 'pods' ? 'no limit' : '';
     return `${formatMetric(key, ceiling)} ${kindId === 'nodes' ? 'allocatable' : 'limit'}`;
+  }
+
+  /**
+   * "512Mi of 1Gi limit": the share in words. With a partial ceiling, the
+   * part measured and the containers left out of it.
+   */
+  function shareLabel(kindId, key, reading, withPct) {
+    const of = ceilingLabel(kindId, key, reading.ceiling);
+    if (!reading.ceiling) return of;
+    const used = reading.partial ? reading.partial.used : reading.value;
+    return `${formatMetric(key, used)} of ${of}${withPct ? ` (${formatPct(reading.pct)})` : ''}`
+      + (reading.partial ? `, not counting ${reading.partial.unlimited.join(', ')} (no limit)` : '');
   }
 
   /** "12m" to "4m": how long a span of readings covers, for the tooltips. */
@@ -2269,7 +2286,9 @@
    */
   function sparkline(usage, key, domain, width, height, className) {
     const field = METRIC_FIELD[key];
-    const { ceiling, tone } = metricReading(usage, key);
+    const { ceiling: bound, partial, tone } = metricReading(usage, key);
+    // The line is the whole pod, which a partial ceiling does not bound.
+    const ceiling = partial ? null : bound;
     const points = usage.samples.map((s) => [usage.from + s[0] * 1000, s[field]]);
     const peak = points.reduce((max, p) => Math.max(max, p[1]), 0);
     const top = ceiling ? Math.max(ceiling, peak) : peak * 1.15 || 1;
@@ -2331,9 +2350,9 @@
   function metricSignature(row, col, domain) {
     const u = row.usage;
     if (!u || !domain) return '';
-    const { value, ceiling } = metricReading(u, col.metric);
+    const { value, ceiling, pct } = metricReading(u, col.metric);
     return col.share
-      ? [value, ceiling].join('|')
+      ? [value, ceiling, pct].join('|')
       : [u.to, value, u.samples.length, ceiling, domain.from, domain.to].join('|');
   }
 
@@ -2359,14 +2378,16 @@
     const u = row.usage;
     if (!u) return 'No reading from metrics-server';
     const key = col.metric;
-    const { value, ceiling, pct } = metricReading(u, key);
-    const of = ceilingLabel(state.active, key, ceiling);
-    if (col.share) {
-      return ceiling ? `${formatMetric(key, value)} of ${of}` : of;
-    }
+    const reading = metricReading(u, key);
+    if (col.share) return shareLabel(state.active, key, reading, false);
+    const share = shareLabel(state.active, key, reading, true);
+    // With a partial ceiling the share is not of the whole reading, so the
+    // total goes on a line of its own.
+    const now = reading.ceiling && !reading.partial
+      ? share
+      : `${formatMetric(key, reading.value)}${share ? `\n${share}` : ''}`;
     const peak = u.samples.reduce((max, s) => Math.max(max, s[METRIC_FIELD[key]]), 0);
-    return `${formatMetric(key, value)}${of ? ` of ${of}` : ''}${pct !== null ? ` (${formatPct(pct)})` : ''}`
-      + `\npeak ${formatMetric(key, peak)} over the last ${spanLabel(u)}`;
+    return `${now}\npeak ${formatMetric(key, peak)} over the last ${spanLabel(u)}`;
   }
 
   function buildMetricCell(row, col, classes, domain) {
@@ -3564,7 +3585,9 @@
         ),
         sparkline(usage, key, domain, 240, 44, 'large'),
         el('div', { class: 'usage-foot' },
-          el('span', { text: reading.ceiling ? `of ${of}` : of }),
+          el('span', {
+            text: reading.partial ? shareLabel(kind.id, key, reading, false) : reading.ceiling ? `of ${of}` : of
+          }),
           el('span', {
             text: values.length > 1
               ? `${formatMetric(key, Math.min(...values))} – ${formatMetric(key, Math.max(...values))} over ${spanLabel(usage)}`
