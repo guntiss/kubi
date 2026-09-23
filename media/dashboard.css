@@ -863,6 +863,10 @@ td.metric .spark {
   width: 48px;
   height: 16px;
   margin-right: 8px;
+  /* A frame marks out the whole time axis, so a line that only covers the
+     last few minutes reads as partial data rather than a stray mark. */
+  border: 1px solid var(--border);
+  border-radius: 2px;
 }
 /* The reading has a fixed width too, so the sparklines beside it line up down
    the column instead of shifting with each number's length. */
