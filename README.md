@@ -74,7 +74,7 @@ agent with the whole thing in view.
   reads the log of the instance that died — the one that explains the restart.
 
 - **CPU and memory** — Nodes and Pods show live usage with a sparkline of the
-  last ten minutes. Beside each, **CPU %** and **MEM %** give the usage as a
+  last ten minutes, once a full ten minutes has been recorded. Beside each, **CPU %** and **MEM %** give the usage as a
   share of the pod's limits or the node's allocatable; they turn yellow at 75%
   and red at 90%. The drawer draws
   the same history larger, and breaks pod usage down per container. Needs

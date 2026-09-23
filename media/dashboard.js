@@ -2186,6 +2186,15 @@
   const MIN_SPAN_MS = 2 * 60 * 1000;
 
   /**
+   * How much history a table sparkline needs before it is drawn: the
+   * ten-minute window metrics.ts keeps (WINDOW_MS), less a minute of slack for
+   * a metrics-server that scrapes only once a minute. A line across a few
+   * minutes of a small cell reads as a trend it is not; until the window
+   * fills, the table shows the reading alone and the details tab the chart.
+   */
+  const FULL_SPAN_MS = 9 * 60 * 1000;
+
+  /**
    * One time axis for every sparkline in the table, so a spike that hit
    * several pods at once lines up down the column. Per-row axes would stretch
    * a pod started a minute ago across the same width as one watched for ten,
@@ -2272,6 +2281,28 @@
   }
 
   /**
+   * The spacing between readings past which the line breaks: anything well
+   * past the usual step. The floor covers a metrics-server scraping once a
+   * minute, whose normal spacing would otherwise read as a gap at every step.
+   */
+  function sampleGap(usage) {
+    const offsets = usage.samples.map((s) => s[0] * 1000);
+    const steps = offsets.slice(1).map((t, i) => t - offsets[i]).sort((a, b) => a - b);
+    const typical = steps.length ? steps[Math.floor(steps.length / 2)] : 0;
+    return Math.max(150000, typical * 2.5);
+  }
+
+  /**
+   * Whether a row's history fills the table sparkline: it reaches across the
+   * whole window, with no break in the line along the way.
+   */
+  function hasFullHistory(usage) {
+    if (usage.to - usage.from < FULL_SPAN_MS) return false;
+    const gap = sampleGap(usage);
+    return usage.samples.every((s, i) => i === 0 || (s[0] - usage.samples[i - 1][0]) * 1000 <= gap);
+  }
+
+  /**
    * A line of one metric over the shared time axis, with a faint fill under
    * it.
    *
@@ -2296,13 +2327,7 @@
     const pad = 1.5;
     const x = (t) => ((t - domain.from) / span) * width;
     const y = (v) => pad + (1 - v / top) * (height - pad * 2);
-
-    // A gap is anything well past the usual spacing between readings. The
-    // floor covers a metrics-server scraping once a minute, whose normal
-    // spacing would otherwise read as a gap at every step.
-    const steps = points.slice(1).map((p, i) => p[0] - points[i][0]).sort((a, b) => a - b);
-    const typical = steps.length ? steps[Math.floor(steps.length / 2)] : 0;
-    const gap = Math.max(150000, typical * 2.5);
+    const gap = sampleGap(usage);
 
     const segments = [];
     for (const point of points) {
@@ -2358,7 +2383,8 @@
 
   /**
    * The inside of a usage cell: a sparkline and the reading, or for a share
-   * column the percentage alone, coloured once it nears the ceiling.
+   * column the percentage alone, coloured once it nears the ceiling. The
+   * sparkline waits for a full window of history; see `FULL_SPAN_MS`.
    */
   function metricCellContent(row, col, domain) {
     const u = row.usage;
@@ -2368,10 +2394,8 @@
     if (col.share) {
       return reading.pct === null ? [] : [el('span', { class: 'metric-pct' + tone, text: formatPct(reading.pct) })];
     }
-    return [
-      sparkline(u, col.metric, domain, 48, 16, ''),
-      el('span', { class: 'metric-value' + tone, text: formatMetric(col.metric, reading.value) })
-    ];
+    const value = el('span', { class: 'metric-value' + tone, text: formatMetric(col.metric, reading.value) });
+    return hasFullHistory(u) ? [sparkline(u, col.metric, domain, 48, 16, ''), value] : [value];
   }
 
   function metricTitle(row, col) {
