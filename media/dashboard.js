@@ -4572,6 +4572,16 @@
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
   }
 
+  /**
+   * Narrower than `typingInField`: a control holding text of its own to select,
+   * which a checkbox or a dropdown does not.
+   */
+  function editingText(target) {
+    if (!(target instanceof HTMLElement)) return false;
+    return target.matches('textarea, input:not([type="checkbox"]):not([type="radio"])')
+      || target.isContentEditable;
+  }
+
   /** Puts the cursor in the filter box and selects what's there, ready to retype. */
   function focusSearch() {
     const node = searchInput();
@@ -4580,6 +4590,27 @@
     node.select();
     return true;
   }
+
+  /**
+   * Ctrl/Cmd+A ticks every row shown, as the header's box does. It never falls
+   * through to a select-all of the page's text, which highlights everything
+   * selectable at once — the whole drawer, say, when one is open. Only the
+   * filter box keeps it, to select the text being typed there.
+   *
+   * Preventing the default is not enough. VS Code's webview host listens for
+   * keydown on this window and forwards every key to the workbench, whose own
+   * Select All then runs `execCommand('selectAll')` back in this document. That
+   * listener sits on the window in the bubble phase, so the key is stopped here
+   * on the way down, before it gets there — and before the delete dialog, which
+   * keeps every key pressed in it from reaching the handler below.
+   */
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    if ((e.key !== 'a' && e.key !== 'A') || editingText(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!deleteDialog && !rowMenu && isTable() && !state.selected) checkAllShown(true);
+  }, true);
 
   document.addEventListener('keydown', (e) => {
     // The delete dialog handles its own keys; one that arrives here came from
@@ -4642,18 +4673,6 @@
     // Bare '/' is the unmodified shortcut, so it only applies outside a field.
     if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !typingInField(e.target)) {
       if (focusSearch()) e.preventDefault();
-      return;
-    }
-
-    // Ctrl/Cmd+A ticks every row shown, as the header's box does, in place of
-    // the webview selecting the page's text. In the filter box it is still the
-    // text being typed that gets selected, but a focused checkbox is no field:
-    // ticking a box by hand and then asking for the lot is the common case.
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'a' || e.key === 'A')
-        && isTable() && !state.selected
-        && !(typingInField(e.target) && e.target.type !== 'checkbox')) {
-      e.preventDefault();
-      checkAllShown(true);
       return;
     }
 
