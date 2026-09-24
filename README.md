@@ -70,6 +70,11 @@ hand to a coding agent with the whole thing in view.
   | Config | ConfigMaps, Secrets, Service accounts, Resource quotas, Limit ranges |
   | Storage | Volume claims, Volumes, Storage classes |
 
+  Tick rows for the bulk actions with their checkboxes, or drag across the
+  table to draw a selection box, as on the desktop: a plain drag replaces the
+  ticks, **Shift** adds to them and **Ctrl**/**Cmd** flips the rows it covers.
+  Dragging is experimental; turn it off with `kubi.dragToSelect`.
+
 - **Detail drawer** — select a row for its fields plus actions: Describe, YAML,
   Logs, Shell, Pods, Scale, Delete. Scale is offered on Deployments, StatefulSets
   and ReplicaSets, starting from the replica count currently set; scaling to zero
@@ -194,6 +199,7 @@ and `npm run package` then fails.
 | `kubi.editorCommand` | `code --wait` | Editor used as `KUBE_EDITOR` for `kubectl edit`. Must block until the file is closed. |
 | `kubi.autoRefreshSeconds` | `5` | Auto-refresh interval in seconds; `0` disables. Only visible dashboards refresh. |
 | `kubi.preserveCacheAfterUpdates` | `true` | Keep cached dashboard data when the extension updates, so the first dashboard opened after an update paints immediately. Turn it off if you would rather each update start empty: a view cached by an older build can paint blank cells until its first refresh replaces it. Also on the About page. |
+| `kubi.dragToSelect` | `true` | Experimental: select table rows by dragging a selection box across them. |
 
 ## Roadmap
 

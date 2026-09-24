@@ -61,6 +61,12 @@
      * value, so a tick here only asks for the change and waits to be told.
      */
     preserveCache: false,
+    /**
+     * Whether a drag across a table draws a selection box (`kubi.dragToSelect`).
+     * On by default, though still experimental; the extension sends it with
+     * `init` and again whenever it changes.
+     */
+    dragToSelect: true,
     /** True until this kind has ever produced content (cached or fresh). */
     empty: true,
     /** Content on screen came from cache rather than a completed fetch. */
@@ -3054,6 +3060,270 @@
     renderContentOnly();
   }
 
+  // ---------- drag to select ----------
+
+  /**
+   * How far the pointer has to travel with the button down before a press
+   * becomes a drag rather than a click. Windows' own drag threshold: a
+   * deliberate drag starts at once, and the jitter in an ordinary click never
+   * gets that far.
+   */
+  const MARQUEE_THRESHOLD = 4;
+
+  /**
+   * How close the pointer has to come to the pane's edge for a drag to scroll
+   * it, and the fastest it will go, in px per frame. The speed grows with how
+   * far past the edge the pointer is, so a long list can be crept through a
+   * row at a time or run through quickly.
+   */
+  const MARQUEE_EDGE = 8;
+  const MARQUEE_MAX_SPEED = 40;
+
+  /**
+   * The drag in progress, or null. It stays pending — no box, no ticks
+   * touched — until the pointer passes the threshold, so a plain click on a
+   * row still just opens it.
+   */
+  let marquee = null;
+
+  /**
+   * Rubber-band selection, as on the Windows desktop: press on a row, or on
+   * the blank pane below the table, and drag, and every row the rectangle
+   * touches is ticked. A plain drag replaces the ticks, Shift adds to them,
+   * and Ctrl/Cmd flips the rows it covers. Experimental; the
+   * `kubi.dragToSelect` setting turns it off.
+   *
+   * Table text is unselectable by policy (see the stylesheet), so the gesture
+   * takes nothing away from copying.
+   */
+  app.addEventListener('mousedown', (e) => {
+    if (!state.dragToSelect || e.button !== 0 || deleteDialog) return;
+    // A drag whose release never reached us (see `onMarqueeMove`) is over by
+    // now, whatever it last heard: this press is the button going down again.
+    endMarquee();
+    if (!isTable() || state.selected || state.empty || state.error) return;
+    const content = app.querySelector('.content');
+    if (!content || !(e.target instanceof Element) || !content.contains(e.target)) return;
+    let anchorKey = null;
+    if (e.target === content) {
+      // The pane itself is the blank space below the rows — and its own
+      // scrollbars, which report the pane as their target too.
+      const r = content.getBoundingClientRect();
+      if (e.clientX - r.left - content.clientLeft >= content.clientWidth
+        || e.clientY - r.top - content.clientTop >= content.clientHeight) return;
+    } else {
+      const tr = e.target.closest('tbody tr[data-key]');
+      if (!tr || e.target.closest('button, a, select')) return;
+      anchorKey = tr.getAttribute('data-key');
+    }
+    marquee = {
+      content,
+      start: { x: e.clientX, y: e.clientY },
+      // In the pane's scrolled coordinates, so the corner stays on the row it
+      // was pressed on while the pane scrolls under the drag.
+      origin: contentPoint(content, e.clientX, e.clientY),
+      pointer: { x: e.clientX, y: e.clientY },
+      anchorKey,
+      mode: e.shiftKey ? 'add' : (e.ctrlKey || e.metaKey) ? 'toggle' : 'replace',
+      base: null,
+      hits: null,
+      box: null,
+      frame: 0
+    };
+    document.addEventListener('mousemove', onMarqueeMove, true);
+    document.addEventListener('mouseup', onMarqueeUp, true);
+    // A Ctrl-click on macOS is a right-click, and opens the row's menu instead.
+    // Losing focus deliberately does not end the drag: VS Code bounces focus
+    // out of the webview and back whenever it activates the panel — which a
+    // press on an unfocused dashboard does, a moment into the drag — and the
+    // refresh that activation triggers made it look like refreshes cancelled
+    // drags. The button is still held throughout, and the moves say so.
+    document.addEventListener('contextmenu', endMarquee, true);
+  });
+
+  function onMarqueeMove(e) {
+    const m = marquee;
+    if (!m) return;
+    // The button came up somewhere we never heard about, outside the panel.
+    if (!(e.buttons & 1)) {
+      endMarquee();
+      return;
+    }
+    m.pointer = { x: e.clientX, y: e.clientY };
+    if (m.box) return;
+    if (Math.abs(e.clientX - m.start.x) < MARQUEE_THRESHOLD
+      && Math.abs(e.clientY - m.start.y) < MARQUEE_THRESHOLD) return;
+    // What the drag builds on, fixed as it starts: nothing for a plain drag,
+    // which replaces the ticks, or the ticks as they stood for Shift and
+    // Ctrl/Cmd. Each frame recomputes the result from this, so rows the box
+    // passes over and then leaves go back to how they were.
+    m.base = m.mode === 'replace' ? new Set() : new Set(state.checked);
+    m.box = el('div', { class: 'marquee' });
+    m.content.appendChild(m.box);
+    m.content.classList.add('marqueeing');
+    m.frame = requestAnimationFrame(marqueeFrame);
+  }
+
+  function onMarqueeUp(e) {
+    if (e.button !== 0) return;
+    const m = marquee;
+    const dragged = Boolean(m && m.box);
+    // The last move may have landed after the last frame was drawn.
+    if (dragged && m.content.isConnected) {
+      m.pointer = { x: e.clientX, y: e.clientY };
+      drawMarquee(m);
+    }
+    endMarquee();
+    if (dragged) swallowNextClick();
+  }
+
+  /**
+   * Drawn a frame at a time rather than per mousemove, and kept running while
+   * the pointer is still: that is when the pane is scrolling under a pointer
+   * held past its edge, and the box and the ticks have to follow.
+   */
+  function marqueeFrame() {
+    const m = marquee;
+    if (!m || !m.box) return;
+    // A rebuild replaced the pane under the drag — a refresh that emptied the
+    // table, say — and took the box with it.
+    if (!m.content.isConnected) {
+      endMarquee();
+      return;
+    }
+    autoscrollMarquee(m);
+    drawMarquee(m);
+    m.frame = requestAnimationFrame(marqueeFrame);
+  }
+
+  function endMarquee() {
+    const m = marquee;
+    if (!m) return;
+    marquee = null;
+    document.removeEventListener('mousemove', onMarqueeMove, true);
+    document.removeEventListener('mouseup', onMarqueeUp, true);
+    document.removeEventListener('contextmenu', endMarquee, true);
+    if (!m.box) return;
+    cancelAnimationFrame(m.frame);
+    m.box.remove();
+    m.content.classList.remove('marqueeing');
+    // A shift-click after the drag ranges from where it began.
+    if (m.anchorKey !== null) lastCheckedKey = m.anchorKey;
+  }
+
+  /**
+   * The click that follows a drag's mouseup would open the row it was
+   * released on, or flip its box. It arrives straight after the mouseup, in
+   * the same task, when it arrives at all; one released outside the panel
+   * never comes, and the listener must not linger to eat the next real click.
+   */
+  function swallowNextClick() {
+    const swallow = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    window.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener('click', swallow, true), 0);
+  }
+
+  /** A viewport point in the pane's scrolled coordinates. */
+  function contentPoint(content, clientX, clientY) {
+    const r = content.getBoundingClientRect();
+    return {
+      x: clientX - r.left - content.clientLeft + content.scrollLeft,
+      y: clientY - r.top - content.clientTop + content.scrollTop
+    };
+  }
+
+  function autoscrollMarquee(m) {
+    const { content, pointer } = m;
+    const r = content.getBoundingClientRect();
+    const left = r.left + content.clientLeft;
+    const top = r.top + content.clientTop;
+    // Rows scroll away under the sticky header, so the top edge that counts is
+    // the header's bottom rather than the pane's.
+    const head = content.querySelector('thead');
+    const dy = edgeSpeed(pointer.y, top + (head ? head.offsetHeight : 0), top + content.clientHeight);
+    const dx = edgeSpeed(pointer.x, left, left + content.clientWidth);
+    if (dy) content.scrollTop += dy;
+    if (dx) content.scrollLeft += dx;
+  }
+
+  function edgeSpeed(at, low, high) {
+    if (at < low + MARQUEE_EDGE) return -Math.min(MARQUEE_MAX_SPEED, Math.ceil((low + MARQUEE_EDGE - at) / 2));
+    if (at > high - MARQUEE_EDGE) return Math.min(MARQUEE_MAX_SPEED, Math.ceil((at - high + MARQUEE_EDGE) / 2));
+    return 0;
+  }
+
+  function drawMarquee(m) {
+    const { content, origin } = m;
+    const p = contentPoint(content, m.pointer.x, m.pointer.y);
+    // Held inside what the pane can already scroll to, so the box can never
+    // stretch the pane it is drawn in.
+    const clampX = (x) => Math.max(0, Math.min(content.scrollWidth, x));
+    const clampY = (y) => Math.max(0, Math.min(content.scrollHeight, y));
+    const x1 = clampX(Math.min(origin.x, p.x));
+    const x2 = clampX(Math.max(origin.x, p.x));
+    const y1 = clampY(Math.min(origin.y, p.y));
+    const y2 = clampY(Math.max(origin.y, p.y));
+    const style = m.box.style;
+    style.left = `${x1}px`;
+    style.top = `${y1}px`;
+    style.width = `${x2 - x1}px`;
+    style.height = `${y2 - y1}px`;
+    applyMarquee(m, marqueeHits(content, x1, y1, x2, y2));
+  }
+
+  /**
+   * Check keys of the rows the box touches. Rows stack in document order, so
+   * the first one reaching into the box is found by bisection and the rest
+   * follow until one starts below it: a handful of layout reads a frame
+   * rather than one per row, which on a few thousand rows is the difference.
+   */
+  function marqueeHits(content, x1, y1, x2, y2) {
+    const table = content.querySelector('table');
+    const tbody = table && table.tBodies[0];
+    if (!tbody || tbody.querySelector('.empty-row')) return [];
+    const r = content.getBoundingClientRect();
+    const offsetX = r.left + content.clientLeft - content.scrollLeft;
+    const offsetY = r.top + content.clientTop - content.scrollTop;
+    const t = table.getBoundingClientRect();
+    if (t.right - offsetX <= x1 || t.left - offsetX >= x2) return [];
+    const rows = tbody.rows;
+    let lo = 0;
+    let hi = rows.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (rows[mid].getBoundingClientRect().bottom - offsetY <= y1) lo = mid + 1;
+      else hi = mid;
+    }
+    const keys = [];
+    for (let i = lo; i < rows.length; i++) {
+      if (rows[i].getBoundingClientRect().top - offsetY >= y2) break;
+      const live = rowState.get(rows[i]);
+      if (live) keys.push(checkKey(live.row));
+    }
+    return keys;
+  }
+
+  /**
+   * Sets the ticks to the drag's base with the rows under the box applied.
+   * Only repaints when the box has crossed onto or off a row: most frames of
+   * a drag move within the rows already covered and change nothing.
+   */
+  function applyMarquee(m, keys) {
+    const hits = keys.join('\u0001');
+    if (hits === m.hits) return;
+    m.hits = hits;
+    state.checked.clear();
+    for (const key of m.base) state.checked.add(key);
+    for (const key of keys) {
+      if (m.mode === 'toggle' && m.base.has(key)) state.checked.delete(key);
+      else state.checked.add(key);
+    }
+    renderContentOnly();
+  }
+
   /**
    * Bulk actions, in the order they appear in the bar. Declared as data so
    * adding one is a matter of adding an entry rather than editing the bar's
@@ -4080,7 +4350,13 @@
         }
         state.railCollapsed = Boolean(message.railCollapsed);
         document.body.classList.toggle('rail-collapsed', state.railCollapsed);
+        state.dragToSelect = Boolean(message.dragToSelect);
         render();
+        break;
+      case 'dragToSelect':
+        state.dragToSelect = Boolean(message.enabled);
+        // Turned off mid-drag: drop the box, keeping whatever it had ticked.
+        if (!state.dragToSelect) endMarquee();
         break;
       case 'namespace':
         // Restores the saved preference at startup. Rows span all namespaces

@@ -131,6 +131,14 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Keep cached dashboard data after the extension updates, so the first dashboard opened after an update paints immediately. Turn it off to have every update start from an empty cache: a cached payload is rendered as-is, and one written by an older build can paint blank cells until the first refresh replaces it."
+        },
+        "kubi.dragToSelect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Experimental: Enable row selection by dragging.",
+          "tags": [
+            "experimental"
+          ]
         }
       }
     }

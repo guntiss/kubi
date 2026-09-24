@@ -339,6 +339,11 @@ export class DashboardPanel {
         if (e.affectsConfiguration('kubi.preserveCacheAfterUpdates')) {
           this.postCacheStats();
         }
+        // Applied to open dashboards as it changes, so trying it out needs no
+        // reload.
+        if (e.affectsConfiguration('kubi.dragToSelect')) {
+          this.post({ type: 'dragToSelect', enabled: dragToSelect() });
+        }
       })
     );
   }
@@ -608,7 +613,8 @@ export class DashboardPanel {
       // The page this panel was last showing, so a reload repaints the rail on
       // it before the load below starts filling it in.
       active: this.activeKind,
-      railCollapsed: this.extension.globalState.get<boolean>(RAIL_COLLAPSED_KEY, false)
+      railCollapsed: this.extension.globalState.get<boolean>(RAIL_COLLAPSED_KEY, false),
+      dragToSelect: dragToSelect()
     });
     // A webview reload loses its state but not the kubectl processes behind it,
     // so edits in flight have to be replayed or their buttons come back enabled.
@@ -1857,6 +1863,11 @@ function terminalEnv(): Record<string, string> | undefined {
  */
 function isKnownKind(id: string): boolean {
   return id === 'overview' || id === 'about' || kindById(id) !== undefined;
+}
+
+/** Whether a drag across a table draws a selection box. On unless turned off. */
+function dragToSelect(): boolean {
+  return vscode.workspace.getConfiguration('kubi').get<boolean>('dragToSelect') ?? true;
 }
 
 /**

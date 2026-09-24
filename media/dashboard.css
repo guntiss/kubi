@@ -567,9 +567,34 @@ tbody tr.warn:hover { background: rgba(224, 138, 30, calc(0.20 + 0.18 * var(--pu
 }
 
 /*
- * A ticked row gets no fill of its own: the ticked box already says it is in
- * the set, and a tint would hide the health wash of a failing or pending row.
+ * A ticked row gets no fill of its own, since a tint would hide the health wash
+ * of a failing or pending row and the refresh flash drawn over it. It gets a
+ * bar down its leading edge instead: visible from across the table, where the
+ * box alone is not, and on any background the row happens to have.
+ *
+ * The bar runs through the cell's bottom border, so a run of ticked rows reads
+ * as one unbroken stripe — the set is seen as a block, not counted box by box.
+ * The focus colour, as the drag marquee uses, so a drag-select lands as the
+ * same colour it was drawn in.
+ *
+ * A pseudo-element rather than an inset `box-shadow`, which the cursor and
+ * menu rows already use on this cell and would have to be restated with it.
  */
+tbody tr.checked > td.check { position: relative; }
+tbody tr.checked > td.check::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  left: 0;
+  width: 3px;
+  background: var(--vscode-focusBorder);
+  pointer-events: none;
+}
+/* On the open row's selection fill the focus colour can all but vanish. */
+tbody tr.selected.checked > td.check::before {
+  background: var(--vscode-list-activeSelectionForeground, currentColor);
+}
 
 /*
  * The keyboard cursor. An outline rather than a fill, so it can sit on a row
@@ -600,6 +625,22 @@ tbody tr.selected.checked, tbody tr.selected.checked:hover {
 }
 
 /*
+ * The rubber band a drag across the table draws. The focus colour at a low
+ * fill, so it reads as a selection on any theme without hiding the rows it
+ * passes over. Positioned in the pane's scrolled coordinates and painted after
+ * the table, which puts it over the rows but under the sticky header.
+ */
+.marquee {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-focusBorder);
+  background: color-mix(in srgb, var(--vscode-focusBorder) 15%, transparent);
+  pointer-events: none;
+}
+/* Mid-drag the rows are not click targets, so the pointer stops saying so. */
+.content.marqueeing tbody tr { cursor: default; }
+
+/*
  * A row that changed under the 10s auto-refresh, lit for a moment so the change
  * can be caught by someone who was looking at another part of the table. Only
  * changes that arrived on their own are marked: sorting, filtering and ticking
@@ -608,9 +649,8 @@ tbody tr.selected.checked, tbody tr.selected.checked:hover {
  *
  * Drawn as a layer of its own over each cell rather than as the cell's
  * background, because every row background is already spoken for — the health
- * wash, the tick tint, the open-row fill — and a flash that replaced one of
- * those would drop the row's real state for the length of the animation. The
- * layer sits over the colour underneath and leaves it intact, so a failing row
+ * wash, the open-row fill — and a flash that replaced one of those would drop
+ * the row's real state for the length of the animation. The layer sits over the colour underneath and leaves it intact, so a failing row
  * flashes and still reads as failing. Cells rather than the row itself because
  * a row's own background paints behind its cells', where it would be hidden.
  *
