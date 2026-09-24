@@ -74,6 +74,7 @@ hand to a coding agent with the whole thing in view.
   table to draw a selection box, as on the desktop: a plain drag replaces the
   ticks, **Shift** adds to them and **Ctrl**/**Cmd** flips the rows it covers.
   Dragging is experimental; turn it off with `kubi.dragToSelect`.
+  **Ctrl**/**Cmd**+**A** ticks every row shown.
 
 - **Detail drawer** — select a row for its fields plus actions: Describe, YAML,
   Logs, Shell, Pods, Scale, Delete. Scale is offered on Deployments, StatefulSets

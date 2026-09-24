@@ -380,6 +380,34 @@
     state.checked.clear();
   }
 
+  /**
+   * Ticks or unticks every row on screen, for the header's box and Ctrl/Cmd+A.
+   * Only the visible rows: a filtered-out row is not something the user can
+   * see to un-tick, so it must not be ticked on their behalf. Read when called
+   * rather than handed in: the header outlives the rows it was built with, so
+   * the set to tick is whatever is on screen at the moment it is asked for.
+   */
+  function checkAllShown(checked) {
+    for (const row of visibleRows()) {
+      if (checked) {
+        state.checked.add(checkKey(row));
+      } else {
+        state.checked.delete(checkKey(row));
+      }
+    }
+    renderContentOnly();
+  }
+
+  /** The header box's label: what a click on it would do next. */
+  function selectAllLabel(allChecked) {
+    return allChecked ? 'Clear selection' : 'Select all rows shown';
+  }
+
+  /** The same, with the shortcut named when there is one for it. */
+  function selectAllTitle(allChecked) {
+    return allChecked ? selectAllLabel(true) : `${selectAllLabel(false)} (${modifierLabel()}+A)`;
+  }
+
   /** Drops ticks for rows a refresh no longer reports. */
   function pruneChecked(rows) {
     if (!state.checked.size) return;
@@ -1391,10 +1419,10 @@
       if (selectAll.checked !== allChecked) selectAll.checked = allChecked;
       selectAll.disabled = rows.length === 0;
       selectAll.indeterminate = checkedHere > 0 && checkedHere < rows.length;
-      const label = allChecked ? 'Clear selection' : 'Select all rows shown';
+      const label = selectAllLabel(allChecked);
       if (selectAll.getAttribute('aria-label') !== label) {
         selectAll.setAttribute('aria-label', label);
-        selectAll.setAttribute('title', label);
+        selectAll.setAttribute('title', selectAllTitle(allChecked));
       }
     }
     // Cells run one ahead of `columns`, the first being the checkbox column.
@@ -2520,24 +2548,10 @@
       type: 'checkbox',
       class: 'row-check',
       disabled: rows.length === 0 || undefined,
-      title: allChecked ? 'Clear selection' : 'Select all rows shown',
-      'aria-label': allChecked ? 'Clear selection' : 'Select all rows shown',
+      title: selectAllTitle(allChecked),
+      'aria-label': selectAllLabel(allChecked),
       checked: allChecked,
-      onchange: (e) => {
-        // Only the visible rows: a filtered-out row is not something the user
-        // can see to un-tick, so it must not be ticked on their behalf.
-        // Recomputed rather than closed over: the header now outlives the rows
-        // it was built with, so the set to tick is whatever is on screen when
-        // the box is actually clicked.
-        for (const row of visibleRows()) {
-          if (e.target.checked) {
-            state.checked.add(checkKey(row));
-          } else {
-            state.checked.delete(checkKey(row));
-          }
-        }
-        renderContentOnly();
-      }
+      onchange: (e) => checkAllShown(e.target.checked)
     });
     selectAll.indeterminate = checkedHere > 0 && checkedHere < rows.length;
 
@@ -4628,6 +4642,18 @@
     // Bare '/' is the unmodified shortcut, so it only applies outside a field.
     if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !typingInField(e.target)) {
       if (focusSearch()) e.preventDefault();
+      return;
+    }
+
+    // Ctrl/Cmd+A ticks every row shown, as the header's box does, in place of
+    // the webview selecting the page's text. In the filter box it is still the
+    // text being typed that gets selected, but a focused checkbox is no field:
+    // ticking a box by hand and then asking for the lot is the common case.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'a' || e.key === 'A')
+        && isTable() && !state.selected
+        && !(typingInField(e.target) && e.target.type !== 'checkbox')) {
+      e.preventDefault();
+      checkAllShown(true);
       return;
     }
 
