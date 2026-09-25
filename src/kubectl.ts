@@ -498,6 +498,19 @@ export function scale(
 }
 
 /**
+ * Replaces every pod of a workload. kubectl stamps the time on the pod
+ * template, which the controller treats as a new revision and rolls out under
+ * the workload's own update strategy.
+ *
+ * Returns once the patch is accepted, without waiting on `rollout status`: a
+ * rollout lasts as long as its pods take to become ready, and the table's
+ * refresh is where its progress shows.
+ */
+export function restart(resource: string, name: string, context: string, namespace?: string): Promise<string> {
+  return run(['rollout', 'restart', resource, name, ...scopeArgs(namespace)], context, 60000);
+}
+
+/**
  * Deletes several objects of one kind that share a namespace, in a single
  * kubectl call. One process instead of one per object matters for a bulk
  * delete: a hundred rows would otherwise be a hundred process spawns and a

@@ -65,6 +65,8 @@ type Inbound =
       /** `replicas` is the count each row was showing, for the prompt's default. */
       targets: { name: string; namespace?: string; replicas?: number }[];
     }
+  /** A rollout restart, for one workload or a ticked set. Confirmed here. */
+  | { type: 'restart'; kind: string; targets: { name: string; namespace?: string }[] }
   | { type: 'clearCache' }
   /** The "Preserve cache after updates" tick on the About page. */
   | { type: 'setPreserveCache'; preserve: boolean }
@@ -580,6 +582,9 @@ export class DashboardPanel {
         break;
       case 'scaleMany':
         await this.scaleMany(message);
+        break;
+      case 'restart':
+        await this.restart(message);
         break;
       case 'clearCache':
         await this.clearCache();
@@ -1609,6 +1614,85 @@ export class DashboardPanel {
         `Kubi: scaled ${scaled} ${noun} to ${replicas}`
       );
     }
+    await this.load(this.activeKind);
+  }
+
+  /**
+   * Replaces every pod of one workload or several through `kubectl rollout
+   * restart`, after one confirmation for the whole set.
+   *
+   * It confirms even though nothing is removed: a rolling update keeps serving
+   * throughout, but under `Recreate` every old pod stops before a new one
+   * starts, and even a clean roll drops whatever the pods held in memory. The
+   * panel does not know which of those it is about to trigger.
+   *
+   * Each object is its own kubectl call, as with scale. Given several names
+   * kubectl carries on past one it cannot restart — a paused Deployment, most
+   * often — but reports only the failure, so a grouped call could not say
+   * which of the rest went through.
+   */
+  private async restart(message: Extract<Inbound, { type: 'restart' }>): Promise<void> {
+    const { kind, targets } = message;
+    if (!targets.length) {
+      return;
+    }
+    const ctx = this.contextName;
+    const meta = kindById(kind);
+    const singular = (meta?.singular ?? kind).toLowerCase();
+    const noun = targets.length === 1 ? singular : (meta?.label ?? kind).toLowerCase();
+
+    const labels = targets.map((t) => (t.namespace ? `${t.namespace}/${t.name}` : t.name)).sort();
+    const shown = labels.slice(0, 10);
+    const rest = labels.length - shown.length;
+    const list = targets.length > 1
+      ? `${shown.join('\n')}${rest > 0 ? `\n…and ${rest} more` : ''}\n\n`
+      : '';
+
+    const confirmed = await vscode.window.showWarningMessage(
+      targets.length === 1
+        ? `Restart ${singular} "${labels[0]}" in context "${ctx}"?`
+        : `Restart ${targets.length} ${noun} in context "${ctx}"?`,
+      {
+        modal: true,
+        detail: `${list}Every pod is replaced through a new rollout, paced by the update strategy. `
+          + 'Under Recreate, the old pods all stop before any new one starts.'
+      },
+      'Restart'
+    );
+    if (confirmed !== 'Restart') {
+      return;
+    }
+
+    let restarted = 0;
+    const failures: string[] = [];
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Kubi: restarting ${targets.length} ${noun}…` },
+      async () => {
+        for (const target of targets) {
+          try {
+            await k.restart(kind, target.name, ctx, target.namespace);
+            restarted += 1;
+          } catch (err) {
+            const label = target.namespace ? `${target.namespace}/${target.name}` : target.name;
+            failures.push(`${label}: ${describeError(err)}`);
+          }
+        }
+      }
+    );
+
+    if (failures.length) {
+      vscode.window.showErrorMessage(
+        targets.length === 1
+          ? `Kubi: ${failures[0]}`
+          : `Kubi: restarted ${restarted} of ${targets.length}; ${failures.join('; ')}`
+      );
+    } else {
+      vscode.window.showInformationMessage(
+        `Kubi: restarted ${targets.length === 1 ? labels[0] : `${restarted} ${noun}`}`
+      );
+    }
+    // Only the pod template has changed so far; the rollout plays out over the
+    // next while, which the table's own refresh picks up.
     await this.load(this.activeKind);
   }
 

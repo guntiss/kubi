@@ -3376,6 +3376,17 @@
         }))
       })
     },
+    {
+      id: 'restart',
+      applies: (kind) => Boolean(kind && kind.restartable),
+      label: (rows) => `Restart ${rows.length}`,
+      title: (rows, noun) => `Replace every pod of the ${rows.length} selected ${noun} through a new rollout`,
+      run: (rows) => post({
+        type: 'restart',
+        kind: state.active,
+        targets: rows.map((row) => ({ name: row.name, namespace: row.namespace }))
+      })
+    },
     ...['cordon', 'uncordon', 'drain'].map((id) => ({
       id,
       applies: (kind) => Boolean(kind && kind.id === 'nodes'),
@@ -3634,6 +3645,14 @@
     if (kind.scalable) {
       const at = row.replicas !== undefined ? ` (currently ${row.replicas})` : '';
       actions.push({ label: 'Scale…', run: act('scale'), title: `Set the replica count${at}` });
+    }
+    // No ellipsis: like Drain, the extension only confirms, it asks nothing.
+    if (kind.restartable) {
+      actions.push({
+        label: 'Restart',
+        run: () => post({ type: 'restart', kind: kind.id, targets: [{ name: row.name, namespace: row.namespace }] }),
+        title: 'Replace every pod through a new rollout, via kubectl rollout restart'
+      });
     }
     actions.push({
       label: 'Delete',

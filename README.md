@@ -77,9 +77,10 @@ hand to a coding agent with the whole thing in view.
   **Ctrl**/**Cmd**+**A** ticks every row shown.
 
 - **Detail drawer** — select a row for its fields plus actions: Describe, YAML,
-  Logs, Shell, Pods, Scale, Delete. Scale is offered on Deployments, StatefulSets
-  and ReplicaSets, starting from the replica count currently set; scaling to zero
-  confirms first.
+  Logs, Shell, Pods, Scale, Restart, Delete. Scale is offered on Deployments,
+  StatefulSets and ReplicaSets, starting from the replica count currently set;
+  scaling to zero confirms first. Deployments add Restart, which confirms and then
+  replaces every pod through `kubectl rollout restart`.
   Nodes add Cordon or Uncordon, and Drain, which confirms and then runs in a
   terminal. The same actions are on a row's right-click menu; with several rows
   ticked, the menu offers the bulk actions instead.
@@ -215,8 +216,8 @@ and `npm run package` then fails.
 ## Status
 
 Early but usable: read-mostly across the standard resource types. Delete, scale,
-cordon, drain and `kubectl edit` are the only mutating actions; delete and drain
-always confirm first, as does a scale to zero.
+restart, cordon, drain and `kubectl edit` are the only mutating actions; delete,
+restart and drain always confirm first, as does a scale to zero.
 
 Expect rough edges, and please
 [open an issue](https://github.com/guntiss/kubi/issues) when you find one —

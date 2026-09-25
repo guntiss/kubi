@@ -188,6 +188,11 @@ export interface ResourceKind {
    * is immutable on a job that has already started.
    */
   scalable?: boolean;
+  /**
+   * Can be rolled with `kubectl rollout restart` — the panel offers a Restart
+   * button for these.
+   */
+  restartable?: boolean;
 }
 
 const AGE: Column = { key: 'age', label: 'Age', numeric: true };
@@ -320,6 +325,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     icon: 'rocket',
     group: 'workloads',
     scalable: true,
+    restartable: true,
     columns: [
       NAME,
       NAMESPACE,
