@@ -4,6 +4,18 @@ All notable changes to Kubi are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] — 2026-09-25
+
+### Added
+
+- Add Restart for Deployments, via kubectl rollout restart.
+- Add Ctrl/Cmd+A shortcut to select all rows.
+- Add drag-to-select feature.
+
+### Changed
+
+- Stop Ctrl/Cmd+A selecting page text behind drawers and dialogs.
+
 ## [1.0.4] — 2026-09-23
 
 ### Added
