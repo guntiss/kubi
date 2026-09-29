@@ -77,10 +77,13 @@ hand to a coding agent with the whole thing in view.
   **Ctrl**/**Cmd**+**A** ticks every row shown.
 
 - **Detail drawer** — select a row for its fields plus actions: Describe, YAML,
-  Logs, Shell, Pods, Scale, Restart, Delete. Scale is offered on Deployments,
+  Logs, Shell, Pods, Port forward, Scale, Restart, Delete. Scale is offered on Deployments,
   StatefulSets and ReplicaSets, starting from the replica count currently set;
   scaling to zero confirms first. Deployments add Restart, which confirms and then
   replaces every pod through `kubectl rollout restart`.
+  Port forward is offered on Pods, Services, Deployments and StatefulSets: pick a
+  port from the spec, edit the local port (0 for any free one), and it runs in a
+  terminal you close to stop it, with an Open in Browser button once it listens.
   Nodes add Cordon or Uncordon, and Drain, which confirms and then runs in a
   terminal. The same actions are on a row's right-click menu; with several rows
   ticked, the menu offers the bulk actions instead.

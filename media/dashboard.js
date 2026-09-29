@@ -3640,6 +3640,13 @@
         title: 'Cordon the node and evict its pods, in a terminal'
       });
     }
+    if (kind.forwardable) {
+      actions.push({
+        label: 'Port forward…',
+        run: () => post({ type: 'portForward', kind: kind.id, name: row.name, namespace: row.namespace }),
+        title: 'kubectl port-forward, in a terminal'
+      });
+    }
     // Only the kinds with a spec.replicas the scale subresource can write; see
     // `scalable` in model.ts for why DaemonSets and Jobs are not among them.
     if (kind.scalable) {

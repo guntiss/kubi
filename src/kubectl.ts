@@ -392,6 +392,11 @@ export function describe(resource: string, name: string, context: string, namesp
   return run(['describe', resource, name, ...scopeArgs(namespace)], context);
 }
 
+/** One object as parsed JSON, for the few callers that need a field or two. */
+export function getObject(resource: string, name: string, context: string, namespace?: string): Promise<KubeObject> {
+  return runJson<KubeObject>(['get', resource, name, ...scopeArgs(namespace)], context);
+}
+
 export function getYaml(resource: string, name: string, context: string, namespace?: string): Promise<string> {
   return run(['get', resource, name, ...scopeArgs(namespace), '-o', 'yaml'], context);
 }

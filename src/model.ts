@@ -193,6 +193,11 @@ export interface ResourceKind {
    * button for these.
    */
   restartable?: boolean;
+  /**
+   * Has ports `kubectl port-forward` can reach, as `pod/`, `svc/` or a
+   * workload's `kind/name` — the panel offers Port forward for these.
+   */
+  forwardable?: boolean;
 }
 
 const AGE: Column = { key: 'age', label: 'Age', numeric: true };
@@ -232,6 +237,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'pods',
+    forwardable: true,
     label: 'Pods',
     singular: 'Pod',
     namespaced: true,
@@ -253,6 +259,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'services',
+    forwardable: true,
     label: 'Services',
     singular: 'Service',
     namespaced: true,
@@ -319,6 +326,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'deployments',
+    forwardable: true,
     label: 'Deployments',
     singular: 'Deployment',
     namespaced: true,
@@ -338,6 +346,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'statefulsets',
+    forwardable: true,
     label: 'StatefulSets',
     singular: 'StatefulSet',
     namespaced: true,

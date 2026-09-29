@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as net from 'net';
 import * as vscode from 'vscode';
 import * as k from './kubectl';
 import { DashboardCache } from './cache';
@@ -67,6 +68,8 @@ type Inbound =
     }
   /** A rollout restart, for one workload or a ticked set. Confirmed here. */
   | { type: 'restart'; kind: string; targets: { name: string; namespace?: string }[] }
+  /** A port-forward for one pod, service or workload. Ports are picked here. */
+  | { type: 'portForward'; kind: string; name: string; namespace: string }
   | { type: 'clearCache' }
   /** The "Preserve cache after updates" tick on the About page. */
   | { type: 'setPreserveCache'; preserve: boolean }
@@ -585,6 +588,9 @@ export class DashboardPanel {
         break;
       case 'restart':
         await this.restart(message);
+        break;
+      case 'portForward':
+        await this.portForward(message);
         break;
       case 'clearCache':
         await this.clearCache();
@@ -1696,6 +1702,75 @@ export class DashboardPanel {
     await this.load(this.activeKind);
   }
 
+  /**
+   * Forwards a local port to a pod, service or workload, in a terminal named
+   * after the command so that closing it is how the forward is stopped.
+   *
+   * The ports offered come from the object's spec. The local port starts at the
+   * remote one; 0 asks for any free port, which is looked up here rather than
+   * left to kubectl so the address to open is known before the forward starts.
+   */
+  private async portForward(message: Extract<Inbound, { type: 'portForward' }>): Promise<void> {
+    const { kind, name, namespace } = message;
+    const ctx = this.contextName;
+    try {
+      const target = forwardTarget(kind, name);
+      const object = await k.getObject(kind, name, ctx, namespace);
+      const ports = forwardPorts(kind, object);
+
+      let remote: number;
+      if (ports.length) {
+        const picked = await vscode.window.showQuickPick(
+          ports.map((p) => ({
+            label: String(p.port),
+            description: p.label,
+            port: p.port
+          })),
+          { title: `Port forward ${target}`, placeHolder: 'Port to forward to', ignoreFocusOut: true }
+        );
+        if (!picked) {
+          return;
+        }
+        remote = picked.port;
+      } else {
+        const answer = await vscode.window.showInputBox({
+          title: `Port forward ${target}`,
+          prompt: `${target} declares no ports. Port to forward to`,
+          ignoreFocusOut: true,
+          validateInput: (text) => (validPort(text, 1) ? undefined : 'Enter a port from 1 to 65535.')
+        });
+        if (answer === undefined) {
+          return;
+        }
+        remote = Number(answer.trim());
+      }
+
+      const answer = await vscode.window.showInputBox({
+        title: `Port forward ${target}`,
+        prompt: `Local port for ${target}:${remote}, or 0 for any free port`,
+        value: String(remote),
+        valueSelection: [0, String(remote).length],
+        ignoreFocusOut: true,
+        validateInput: (text) => (validPort(text, 0) ? undefined : 'Enter a port from 0 to 65535.')
+      });
+      if (answer === undefined) {
+        return;
+      }
+      let local = Number(answer.trim());
+      if (local === 0) {
+        local = await freePort();
+      } else if (!(await portIsFree(local))) {
+        vscode.window.showErrorMessage(`Kubi: local port ${local} is already in use`);
+        return;
+      }
+
+      const terminal = openPortForward(target, local, remote, ctx, namespace);
+      void announceForward(terminal, local);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Kubi: ${describeError(err)}`);
+    }
+  }
+
   private html(): string {
     const webview = this.panel.webview;
     /**
@@ -1865,6 +1940,119 @@ function openLogs(name: string, context: string, namespace: string, container?: 
   });
   terminal.sendText(`${kubectl} ${args.map(quote).join(' ')}`);
   terminal.show();
+}
+
+/** What `kubectl port-forward` takes for each kind that offers it. */
+const FORWARD_PREFIX: Record<string, string> = {
+  pods: 'pod',
+  services: 'svc',
+  deployments: 'deployment',
+  statefulsets: 'statefulset'
+};
+
+function forwardTarget(kind: string, name: string): string {
+  return `${FORWARD_PREFIX[kind] ?? kind}/${name}`;
+}
+
+/**
+ * The ports an object declares: a service's own ports, and for everything else
+ * its containers' ports. A service forwards its `port`; a pod or workload, the
+ * `containerPort`.
+ */
+function forwardPorts(kind: string, object: k.KubeObject): { port: number; label: string }[] {
+  const spec: any = (object as any).spec ?? {};
+  const found: { port: number; label: string }[] = [];
+  if (kind === 'services') {
+    for (const p of spec.ports ?? []) {
+      found.push({ port: p.port, label: [p.name, p.protocol && p.protocol !== 'TCP' ? p.protocol : ''].filter(Boolean).join(' ') });
+    }
+  } else {
+    const podSpec = kind === 'pods' ? spec : spec.template?.spec ?? {};
+    for (const c of podSpec.containers ?? []) {
+      for (const p of c.ports ?? []) {
+        if ((p.protocol ?? 'TCP') === 'TCP') {
+          found.push({ port: p.containerPort, label: [c.name, p.name].filter(Boolean).join(' · ') });
+        }
+      }
+    }
+  }
+  return found.filter((p, i) => found.findIndex((q) => q.port === p.port) === i);
+}
+
+function validPort(text: string, min: number): boolean {
+  const trimmed = text.trim();
+  return /^\d+$/.test(trimmed) && Number(trimmed) >= min && Number(trimmed) <= 65535;
+}
+
+function portIsFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)));
+  });
+}
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as net.AddressInfo;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+/** Runs the forward in a terminal; closing the terminal ends it. */
+function openPortForward(target: string, local: number, remote: number, context: string, namespace: string): vscode.Terminal {
+  const kubectl = vscode.workspace.getConfiguration('kubi').get<string>('kubectlPath') || 'kubectl';
+  const args = [
+    ...kubeconfigArgs(),
+    '--context', context, 'port-forward', target, `${local}:${remote}`, '-n', namespace
+  ];
+  const terminal = vscode.window.createTerminal({
+    name: `Kubi: port-forward ${target} ${local}:${remote}`,
+    env: terminalEnv()
+  });
+  terminal.sendText(`${kubectl} ${args.map(quote).join(' ')}`);
+  terminal.show();
+  return terminal;
+}
+
+/**
+ * Waits for the local port to start accepting connections, then offers to open
+ * it. Gives up when the terminal closes or after a minute — kubectl exits at
+ * once on a bad target, and the terminal shows why.
+ */
+async function announceForward(terminal: vscode.Terminal, port: number): Promise<void> {
+  let closed = false;
+  const sub = vscode.window.onDidCloseTerminal((t) => {
+    if (t === terminal) {
+      closed = true;
+    }
+  });
+  try {
+    for (let i = 0; i < 120 && !closed; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (await new Promise<boolean>((resolve) => {
+        const socket = net.connect(port, '127.0.0.1');
+        socket.once('connect', () => { socket.destroy(); resolve(true); });
+        socket.once('error', () => resolve(false));
+      })) {
+        const url = `http://localhost:${port}`;
+        const choice = await vscode.window.showInformationMessage(
+          `Kubi: forwarding ${url}`,
+          'Open in Browser'
+        );
+        if (choice === 'Open in Browser') {
+          await vscode.env.openExternal(vscode.Uri.parse(url));
+        }
+        return;
+      }
+    }
+  } finally {
+    sub.dispose();
+  }
 }
 
 /**
