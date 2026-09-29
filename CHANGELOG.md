@@ -4,6 +4,17 @@ All notable changes to Kubi are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] — 2026-09-29
+
+### Added
+
+- Add kubi.dashboardLocation setting, opening dashboards in a new tab by default.
+- Add RBAC, PodDisruptionBudgets, PriorityClasses, IngressClasses and webhook configurations.
+- Add Trigger now, Suspend and Resume for CronJobs.
+- Add Restart for StatefulSets and DaemonSets, warning on OnDelete.
+- Add Reveal and Copy for Secret values in the drawer.
+- Add Port forward for Pods, Services, Deployments and StatefulSets.
+
 ## [1.0.5] — 2026-09-25
 
 ### Added
