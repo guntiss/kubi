@@ -70,6 +70,8 @@ type Inbound =
   | { type: 'restart'; kind: string; targets: { name: string; namespace?: string }[] }
   /** A port-forward for one pod, service or workload. Ports are picked here. */
   | { type: 'portForward'; kind: string; name: string; namespace: string }
+  /** One Secret key, decoded on demand: shown in the drawer, or copied unseen. */
+  | { type: 'secretValue'; mode: 'reveal' | 'copy'; name: string; namespace: string; key: string }
   | { type: 'clearCache' }
   /** The "Preserve cache after updates" tick on the About page. */
   | { type: 'setPreserveCache'; preserve: boolean }
@@ -349,6 +351,9 @@ export class DashboardPanel {
         if (e.affectsConfiguration('kubi.dragToSelect')) {
           this.post({ type: 'dragToSelect', enabled: dragToSelect() });
         }
+        if (e.affectsConfiguration('kubi.allowSecretReveal')) {
+          this.post({ type: 'allowSecretReveal', enabled: allowSecretReveal() });
+        }
       })
     );
   }
@@ -592,6 +597,9 @@ export class DashboardPanel {
       case 'portForward':
         await this.portForward(message);
         break;
+      case 'secretValue':
+        await this.secretValue(message);
+        break;
       case 'clearCache':
         await this.clearCache();
         break;
@@ -625,7 +633,8 @@ export class DashboardPanel {
       // it before the load below starts filling it in.
       active: this.activeKind,
       railCollapsed: this.extension.globalState.get<boolean>(RAIL_COLLAPSED_KEY, false),
-      dragToSelect: dragToSelect()
+      dragToSelect: dragToSelect(),
+      allowSecretReveal: allowSecretReveal()
     });
     // A webview reload loses its state but not the kubectl processes behind it,
     // so edits in flight have to be replayed or their buttons come back enabled.
@@ -1771,6 +1780,48 @@ export class DashboardPanel {
     }
   }
 
+  /**
+   * Fetches one Secret key fresh and either hands the decoded text to the
+   * drawer or puts it on the clipboard without it ever reaching the page.
+   *
+   * Nothing is cached: the value lives in this function, the reply message and
+   * (for Reveal) the drawer until it closes. A value that is not valid UTF-8 is
+   * never sent as text: Reveal reports only its size, and Copy puts the base64
+   * form on the clipboard instead.
+   */
+  private async secretValue(message: Extract<Inbound, { type: 'secretValue' }>): Promise<void> {
+    const { mode, name, namespace, key } = message;
+    const reply = { type: 'secretValue', name, namespace, key };
+    if (!allowSecretReveal()) {
+      this.post({ ...reply, error: 'Revealing Secret values is turned off (kubi.allowSecretReveal).' });
+      return;
+    }
+    try {
+      const encoded = (await k.secretKeyValue(name, key, this.contextName, namespace)).trim();
+      const bytes = Buffer.from(encoded, 'base64');
+      let text: string | undefined;
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      } catch {
+        text = undefined;
+      }
+      if (mode === 'copy') {
+        await vscode.env.clipboard.writeText(text ?? encoded);
+        vscode.window.setStatusBarMessage(
+          text === undefined ? `Kubi: copied ${key} as base64 (binary value)` : `Kubi: copied ${key}`,
+          3000
+        );
+        this.post({ ...reply, copied: true });
+      } else if (text === undefined) {
+        this.post({ ...reply, binary: bytes.length });
+      } else {
+        this.post({ ...reply, text });
+      }
+    } catch (err) {
+      this.post({ ...reply, error: describeError(err) });
+    }
+  }
+
   private html(): string {
     const webview = this.panel.webview;
     /**
@@ -2138,6 +2189,10 @@ function isKnownKind(id: string): boolean {
 }
 
 /** Whether a drag across a table draws a selection box. On unless turned off. */
+function allowSecretReveal(): boolean {
+  return vscode.workspace.getConfiguration('kubi').get<boolean>('allowSecretReveal') ?? true;
+}
+
 function dragToSelect(): boolean {
   return vscode.workspace.getConfiguration('kubi').get<boolean>('dragToSelect') ?? true;
 }

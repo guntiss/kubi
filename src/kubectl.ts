@@ -397,6 +397,21 @@ export function getObject(resource: string, name: string, context: string, names
   return runJson<KubeObject>(['get', resource, name, ...scopeArgs(namespace)], context);
 }
 
+/**
+ * One key of a Secret, still base64 as the API serves it. Fetched per call and
+ * never kept: the list refresh must stay value-free. Keys are limited to
+ * `[-._a-zA-Z0-9]` by Kubernetes, and anything else is refused here rather than
+ * put into a JSONPath expression.
+ */
+export function secretKeyValue(name: string, key: string, context: string, namespace?: string): Promise<string> {
+  if (!/^[-._a-zA-Z0-9]+$/.test(key)) {
+    return Promise.reject(new Error(`invalid Secret key "${key}"`));
+  }
+  // Dots are escaped rather than bracket-quoted: kubectl's `['a.b']` form
+  // silently returns nothing.
+  return run(['get', 'secret', name, ...scopeArgs(namespace), '-o', `jsonpath={.data.${key.replace(/\./g, '\\.')}}`], context);
+}
+
 export function getYaml(resource: string, name: string, context: string, namespace?: string): Promise<string> {
   return run(['get', resource, name, ...scopeArgs(namespace), '-o', 'yaml'], context);
 }

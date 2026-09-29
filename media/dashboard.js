@@ -67,6 +67,8 @@
      * `init` and again whenever it changes.
      */
     dragToSelect: true,
+    /** Whether the drawer offers Reveal and Copy for Secret values (`kubi.allowSecretReveal`). */
+    allowSecretReveal: true,
     /** True until this kind has ever produced content (cached or fresh). */
     empty: true,
     /** Content on screen came from cache rather than a completed fetch. */
@@ -248,6 +250,36 @@
     return { requested: false, loading: false, text: '', error: '', stale: false, generated: 0 };
   }
 
+  /**
+   * Secret values currently revealed in the drawer, by key: `{ text }`,
+   * `{ binary }` (a byte count) or `{ error }`, or `{ loading }` while the
+   * fetch is out. Held here and nowhere else — not in `state`, the cache or
+   * `vscode.setState` — and dropped when the selection changes, when the
+   * drawer closes, or after SECRET_REVEAL_MS.
+   * @type {Map<string, {loading?: boolean, text?: string, binary?: number, error?: string, timer?: number}>}
+   */
+  const secretValues = new Map();
+  const SECRET_REVEAL_MS = 30000;
+
+  function clearSecretValues() {
+    for (const entry of secretValues.values()) clearTimeout(entry.timer);
+    secretValues.clear();
+  }
+
+  function hideSecretValue(key) {
+    const entry = secretValues.get(key);
+    if (entry) clearTimeout(entry.timer);
+    secretValues.delete(key);
+  }
+
+  function requestSecretValue(row, key, mode) {
+    if (mode === 'reveal') {
+      hideSecretValue(key);
+      secretValues.set(key, { loading: true });
+    }
+    post({ type: 'secretValue', mode, name: row.name, namespace: row.namespace, key });
+  }
+
   /** A fresh Events section: nothing fetched, showing only the newest few. */
   function newObjectEvents() {
     return { loading: false, rows: [], error: '', stale: false, generated: 0, expanded: false };
@@ -264,6 +296,7 @@
    */
   function selectRow(row) {
     state.selected = row;
+    clearSecretValues();
     state.detailTab = 'details';
     state.describe = newDescribe();
     state.events = newObjectEvents();
@@ -3880,11 +3913,57 @@
                 el('dd', {}, label === 'Status' ? el('span', { class: 'pill ' + row.health }, value) : value)
               ])),
               renderUsage(kind, usage),
+              renderSecretData(row),
               renderContainers(row, act, usage),
               renderObjectEvents()
             ),
         el('div', { class: 'actions' }, ...actions)
       )
+    );
+  }
+
+  /**
+   * A Secret's keys with Reveal and Copy for each. The values are not on the
+   * row: Reveal fetches one, shows it until the drawer closes or a timeout, and
+   * Copy sends it to the clipboard from the extension without showing it.
+   */
+  function renderSecretData(row) {
+    if (state.active !== 'secrets' || !state.allowSecretReveal) return null;
+    const keys = currentRow(row).secretKeys || [];
+    if (!keys.length) return null;
+    return el('div', { class: 'secret-data' },
+      el('h3', {}, 'Data', el('span', { class: 'count', text: String(keys.length) })),
+      ...keys.map((key) => {
+        const entry = secretValues.get(key);
+        const shown = entry && !entry.loading && !entry.error;
+        const value = !entry ? '••••••••'
+          : entry.loading ? 'Loading…'
+          : entry.error ? entry.error
+          : entry.binary !== undefined ? `<binary, ${entry.binary} byte${entry.binary === 1 ? '' : 's'}>`
+          : entry.text;
+        return el('div', { class: 'secret-key' },
+          el('div', { class: 'secret-head' },
+            el('span', { class: 'secret-name', text: key, title: key }),
+            el('span', { class: 'secret-actions' },
+              el('button', {
+                disabled: entry && entry.loading,
+                onclick: () => {
+                  if (shown) hideSecretValue(key); else requestSecretValue(row, key, 'reveal');
+                  renderContentOnly();
+                },
+                title: shown ? 'Mask the value again' : 'Fetch and show this value'
+              }, shown ? 'Hide' : 'Reveal'),
+              el('button', {
+                onclick: () => requestSecretValue(row, key, 'copy'),
+                title: entry && entry.binary !== undefined
+                  ? 'Binary value: copies it base64-encoded'
+                  : 'Copy the decoded value without showing it'
+              }, entry && entry.binary !== undefined ? 'Copy base64' : 'Copy')
+            )
+          ),
+          el('pre', { class: 'secret-value' + (entry && entry.error ? ' error' : '') + (!entry ? ' masked' : ''), text: value })
+        );
+      })
     );
   }
 
@@ -4391,8 +4470,40 @@
         state.railCollapsed = Boolean(message.railCollapsed);
         document.body.classList.toggle('rail-collapsed', state.railCollapsed);
         state.dragToSelect = Boolean(message.dragToSelect);
+        state.allowSecretReveal = message.allowSecretReveal !== false;
         render();
         break;
+      case 'allowSecretReveal':
+        state.allowSecretReveal = Boolean(message.enabled);
+        if (!state.allowSecretReveal) clearSecretValues();
+        renderContentOnly();
+        break;
+      case 'secretValue': {
+        // Same staleness rule as describe: a reply for a row that is no longer
+        // open is dropped, and its value with it.
+        if (state.active !== 'secrets' || !state.selected || !isSelected(message)) break;
+        // The copy went to the clipboard from the extension; nothing to show.
+        if (message.copied) break;
+        const entry = secretValues.get(message.key);
+        if (message.error) {
+          // A failed copy has no entry to report on; show it under the key.
+          hideSecretValue(message.key);
+          secretValues.set(message.key, { error: message.error, timer: setTimeout(() => {
+            hideSecretValue(message.key);
+            renderContentOnly();
+          }, SECRET_REVEAL_MS) });
+        } else if (entry && entry.loading) {
+          secretValues.set(message.key, {
+            ...(message.binary !== undefined ? { binary: message.binary } : { text: message.text }),
+            timer: setTimeout(() => {
+              hideSecretValue(message.key);
+              renderContentOnly();
+            }, SECRET_REVEAL_MS)
+          });
+        }
+        renderContentOnly();
+        break;
+      }
       case 'dragToSelect':
         state.dragToSelect = Boolean(message.enabled);
         // Turned off mid-drag: drop the box, keeping whatever it had ticked.

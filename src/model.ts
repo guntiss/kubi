@@ -130,6 +130,12 @@ export interface Row {
   /** Nodes only: `spec.unschedulable`, so the menu can offer Cordon or Uncordon. */
   unschedulable?: boolean;
   /**
+   * Secrets only: the names of the keys under `data`, so the drawer can offer
+   * Reveal and Copy per key. Names only; a value is fetched on demand and never
+   * rides on a row.
+   */
+  secretKeys?: string[];
+  /**
    * Pods being deleted only: when the deletion was requested, so the webview
    * can count up "Terminating (13s)" live instead of showing a bare word.
    */
@@ -645,6 +651,7 @@ export function toRow(kindId: string, object: k.KubeObject): Row {
     ...(built.containers ? { containers: built.containers } : {}),
     ...(built.replicas !== undefined ? { replicas: built.replicas } : {}),
     ...(built.unschedulable ? { unschedulable: true } : {}),
+    ...(built.secretKeys ? { secretKeys: built.secretKeys } : {}),
     ...(built.terminating ? { terminating: built.terminating } : {}),
     ...(built.terminatingGrace ? { terminatingGrace: built.terminatingGrace } : {}),
     ...(owner ? { owner } : {}),
@@ -673,6 +680,7 @@ interface Built {
   containers?: ContainerInfo[];
   replicas?: number;
   unschedulable?: boolean;
+  secretKeys?: string[];
   terminating?: string;
   terminatingGrace?: number;
 }
@@ -1286,13 +1294,14 @@ function buildConfigMap(map: k.KubeObject): Built {
 function buildSecret(secret: k.KubeObject): Built {
   // Only the key names are ever read here; values stay in the cluster. The
   // table is something people screen-share, and a decoded value has no place
-  // in it — the YAML actions are the deliberate way to see one.
+  // in it — the drawer's Reveal and Copy fetch one key at a time, on demand.
   const { keys, count } = dataKeys(secret);
   const type = (secret as any).type ?? 'Opaque';
   return {
     health: count === 0 ? 'muted' : 'ok',
     status: type,
-    cells: { type, keys: keys || '<empty>', data: String(count) }
+    cells: { type, keys: keys || '<empty>', data: String(count) },
+    secretKeys: Object.keys((secret as any).data ?? {})
   };
 }
 
