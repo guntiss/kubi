@@ -221,7 +221,7 @@ export class DashboardPanel {
     const panel = vscode.window.createWebviewPanel(
       DashboardPanel.viewType,
       contextName,
-      vscode.ViewColumn.Active,
+      dashboardColumn(),
       {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -2370,6 +2370,12 @@ function allowSecretReveal(): boolean {
 
 function dragToSelect(): boolean {
   return vscode.workspace.getConfiguration('kubi').get<boolean>('dragToSelect') ?? true;
+}
+
+/** Where a new dashboard opens, per `kubi.dashboardLocation`. */
+function dashboardColumn(): vscode.ViewColumn {
+  const where = vscode.workspace.getConfiguration('kubi').get<string>('dashboardLocation');
+  return where === 'inline' ? vscode.ViewColumn.Active : vscode.ViewColumn.Beside;
 }
 
 /**
