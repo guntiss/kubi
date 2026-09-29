@@ -359,6 +359,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     icon: 'database',
     group: 'workloads',
     scalable: true,
+    restartable: true,
     columns: [
       NAME,
       NAMESPACE,
@@ -375,6 +376,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'layers',
     group: 'workloads',
+    restartable: true,
     columns: [
       NAME,
       NAMESPACE,

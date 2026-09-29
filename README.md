@@ -79,8 +79,10 @@ hand to a coding agent with the whole thing in view.
 - **Detail drawer** — select a row for its fields plus actions: Describe, YAML,
   Logs, Shell, Pods, Port forward, Scale, Restart, Delete. Scale is offered on Deployments,
   StatefulSets and ReplicaSets, starting from the replica count currently set;
-  scaling to zero confirms first. Deployments add Restart, which confirms and then
-  replaces every pod through `kubectl rollout restart`.
+  scaling to zero confirms first. Deployments, StatefulSets and DaemonSets add
+  Restart, which confirms, describing how that kind rolls, and then replaces every
+  pod through `kubectl rollout restart`; it warns when the update strategy is
+  `OnDelete`, where nothing is replaced until the pods are deleted.
   Port forward is offered on Pods, Services, Deployments and StatefulSets: pick a
   port from the spec, edit the local port (0 for any free one), and it runs in a
   terminal you close to stop it, with an Open in Browser button once it listens.

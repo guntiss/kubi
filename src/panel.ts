@@ -1663,15 +1663,13 @@ export class DashboardPanel {
       ? `${shown.join('\n')}${rest > 0 ? `\n…and ${rest} more` : ''}\n\n`
       : '';
 
+    const rollout = await this.describeRollout(kind, targets, labels.length === 1);
+
     const confirmed = await vscode.window.showWarningMessage(
       targets.length === 1
         ? `Restart ${singular} "${labels[0]}" in context "${ctx}"?`
         : `Restart ${targets.length} ${noun} in context "${ctx}"?`,
-      {
-        modal: true,
-        detail: `${list}Every pod is replaced through a new rollout, paced by the update strategy. `
-          + 'Under Recreate, the old pods all stop before any new one starts.'
-      },
+      { modal: true, detail: `${list}${rollout}` },
       'Restart'
     );
     if (confirmed !== 'Restart') {
@@ -1709,6 +1707,52 @@ export class DashboardPanel {
     // Only the pod template has changed so far; the rollout plays out over the
     // next while, which the table's own refresh picks up.
     await this.load(this.activeKind);
+  }
+
+  /**
+   * The confirmation's account of how the pods will be replaced, which differs
+   * per kind. The update strategy is read from each object, since `OnDelete`
+   * turns a restart into a no-op until the pods are deleted by hand; when an
+   * object cannot be read the text falls back to the kind's usual behaviour,
+   * because kubectl will report the real failure on its own.
+   */
+  private async describeRollout(
+    kind: string,
+    targets: { name: string; namespace?: string }[],
+    single: boolean
+  ): Promise<string> {
+    const generic: Record<string, string> = {
+      statefulsets: 'Pods are replaced one at a time, from the highest ordinal down, each waiting to be Ready '
+        + 'before the next; a rollingUpdate maxUnavailable above 1 lets several go at once.',
+      daemonsets: 'Pods are replaced node by node, following the update strategy; maxUnavailable sets how '
+        + 'many nodes go at once.'
+    };
+    const base = generic[kind]
+      ?? 'Every pod is replaced through a new rollout, paced by the update strategy. '
+        + 'Under Recreate, the old pods all stop before any new one starts.';
+
+    if (kind !== 'statefulsets' && kind !== 'daemonsets') {
+      return base;
+    }
+    const ctx = this.contextName;
+    const onDelete: string[] = [];
+    await Promise.all(targets.map(async (target) => {
+      try {
+        const obj = await k.getObject(kind, target.name, ctx, target.namespace);
+        if ((obj as any)?.spec?.updateStrategy?.type === 'OnDelete') {
+          onDelete.push(target.namespace ? `${target.namespace}/${target.name}` : target.name);
+        }
+      } catch {
+        // Fall back to the generic text; the restart itself reports the failure.
+      }
+    }));
+    if (!onDelete.length) {
+      return base;
+    }
+    onDelete.sort();
+    const who = single ? 'This one uses' : `${onDelete.join(', ')} ${onDelete.length === 1 ? 'uses' : 'use'}`;
+    return `${base}\n\nWarning: ${who} the OnDelete update strategy, so the restart changes the pod `
+      + 'template but replaces nothing until its pods are deleted.';
   }
 
   /**
