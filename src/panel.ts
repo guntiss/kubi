@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import * as k from './kubectl';
 import { DashboardCache } from './cache';
 import { metricsFor } from './metrics';
-import { GROUPS, KINDS, Row, kindById, skew, toRow } from './model';
+import { GROUPS, KINDS, REFERENCES, Refs, Row, kindById, skew, toRow } from './model';
 
 /** Rail collapse is a global layout preference, shared by every context's panel. */
 const RAIL_COLLAPSED_KEY = 'kubi.railCollapsed';
@@ -968,6 +968,37 @@ export class DashboardPanel {
     this.post({ type: 'cancelled', kind: running.kind });
   }
 
+  /**
+   * The lists a kind's rows are judged against; see `REFERENCES`. Read beside
+   * the kind's own list. One that fails — most often a role that may not list
+   * roles — is left out rather than failing the table, and the checks that
+   * need it are skipped; only a cancellation propagates.
+   */
+  private async listReferences(kindId: string, signal: AbortSignal): Promise<Refs> {
+    const wanted = REFERENCES[kindId] ?? [];
+    const lists = await Promise.all(
+      wanted.map(async (id) => {
+        try {
+          const meta = kindById(id);
+          return await k.list(id, this.contextName, meta?.namespaced ? k.ALL_NAMESPACES : undefined, signal);
+        } catch (err) {
+          if (k.isCancelled(err)) {
+            throw err;
+          }
+          return undefined;
+        }
+      })
+    );
+    const refs: Refs = {};
+    wanted.forEach((id, index) => {
+      const list = lists[index];
+      if (list) {
+        refs[id] = list;
+      }
+    });
+    return refs;
+  }
+
   private async loadKind(kindId: string, token: number, signal: AbortSignal): Promise<void> {
     const kind = kindById(kindId);
     if (!kind) {
@@ -979,13 +1010,14 @@ export class DashboardPanel {
       // for the slower of the two instead of their sum. The metrics half never
       // fails the load, and costs nothing for kinds metrics-server does not
       // report on; see `refresh`.
-      const [items] = await Promise.all([
+      const [items, refs] = await Promise.all([
         k.list(
           kind.id,
           this.contextName,
           kind.namespaced ? k.ALL_NAMESPACES : undefined,
           signal
         ),
+        this.listReferences(kind.id, signal),
         metrics.refresh(kind.id)
       ]);
       if (token !== this.loadToken) {
@@ -993,7 +1025,7 @@ export class DashboardPanel {
       }
       // A log is ordered by time; everything else reads as an inventory.
       const rows = items
-        .map((item) => metrics.decorate(kind.id, toRow(kind.id, item), item))
+        .map((item) => metrics.decorate(kind.id, toRow(kind.id, item, refs), item))
         .sort(kindId === 'events' ? byNewest : byNamespaceThenName);
       const generated = Date.now();
       this.cache.set(this.cacheKey(kindId), rows, generated);

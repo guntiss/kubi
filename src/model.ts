@@ -166,14 +166,15 @@ export interface Owner {
  * the way the API itself is organised lets someone find a kind by what it does
  * rather than by reading every entry. Order here is the order they appear.
  */
-export type KindGroup = 'cluster' | 'workloads' | 'network' | 'config' | 'storage';
+export type KindGroup = 'cluster' | 'workloads' | 'network' | 'config' | 'storage' | 'access';
 
 export const GROUPS: { id: KindGroup; label: string }[] = [
   { id: 'cluster', label: 'Cluster' },
   { id: 'workloads', label: 'Workloads' },
   { id: 'network', label: 'Network' },
   { id: 'config', label: 'Config' },
-  { id: 'storage', label: 'Storage' }
+  { id: 'storage', label: 'Storage' },
+  { id: 'access', label: 'Access' }
 ];
 
 export interface ResourceKind {
@@ -221,6 +222,16 @@ const share = (metric: 'cpu' | 'memory', label: string): Column =>
   ({ key: metric === 'cpu' ? 'cpuPct' : 'memPct', label, numeric: true, metric, share: true });
 const NAME: Column = { key: 'name', label: 'Name' };
 const NAMESPACE: Column = { key: 'namespace', label: 'Namespace' };
+
+/** Validating and mutating configurations are the same shape and are judged the same way. */
+const WEBHOOK_COLUMNS: Column[] = [
+  NAME,
+  { key: 'status', label: 'Status' },
+  { key: 'webhooks', label: 'Webhooks', numeric: true },
+  { key: 'policy', label: 'Failure policy' },
+  { key: 'targets', label: 'Targets' },
+  AGE
+];
 
 const DECLARED_KINDS: ResourceKind[] = [
   {
@@ -612,8 +623,154 @@ const DECLARED_KINDS: ResourceKind[] = [
       { key: 'expansion', label: 'Expandable', secondary: true },
       AGE
     ]
+  },
+  {
+    id: 'poddisruptionbudgets',
+    label: 'Disruption budgets',
+    singular: 'PodDisruptionBudget',
+    namespaced: true,
+    icon: 'shield',
+    group: 'workloads',
+    columns: [
+      NAME,
+      NAMESPACE,
+      { key: 'status', label: 'Status' },
+      { key: 'minAvailable', label: 'Min available', numeric: true, secondary: true },
+      { key: 'maxUnavailable', label: 'Max unavailable', numeric: true, secondary: true },
+      { key: 'allowed', label: 'Allowed', numeric: true },
+      { key: 'healthy', label: 'Healthy', numeric: true },
+      AGE
+    ]
+  },
+  {
+    id: 'priorityclasses',
+    label: 'Priority classes',
+    singular: 'PriorityClass',
+    namespaced: false,
+    icon: 'stack',
+    group: 'config',
+    columns: [
+      NAME,
+      { key: 'value', label: 'Value', numeric: true },
+      { key: 'default', label: 'Default' },
+      { key: 'preemption', label: 'Preemption', secondary: true },
+      { key: 'description', label: 'Description', secondary: true },
+      AGE
+    ],
+    sort: { key: 'value', dir: -1 }
+  },
+  {
+    id: 'ingressclasses',
+    label: 'Ingress classes',
+    singular: 'IngressClass',
+    namespaced: false,
+    icon: 'globe',
+    group: 'network',
+    columns: [
+      NAME,
+      { key: 'controller', label: 'Controller' },
+      { key: 'default', label: 'Default' },
+      { key: 'parameters', label: 'Parameters', secondary: true },
+      AGE
+    ]
+  },
+  {
+    id: 'validatingwebhookconfigurations',
+    label: 'Validating webhooks',
+    singular: 'ValidatingWebhookConfiguration',
+    namespaced: false,
+    icon: 'shield',
+    group: 'config',
+    columns: WEBHOOK_COLUMNS
+  },
+  {
+    id: 'mutatingwebhookconfigurations',
+    label: 'Mutating webhooks',
+    singular: 'MutatingWebhookConfiguration',
+    namespaced: false,
+    icon: 'shield',
+    group: 'config',
+    columns: WEBHOOK_COLUMNS
+  },
+  {
+    id: 'roles',
+    label: 'Roles',
+    singular: 'Role',
+    namespaced: true,
+    icon: 'lock',
+    group: 'access',
+    columns: [
+      NAME,
+      NAMESPACE,
+      { key: 'rules', label: 'Rules', numeric: true },
+      { key: 'aggregation', label: 'Aggregation', secondary: true },
+      AGE
+    ]
+  },
+  {
+    id: 'rolebindings',
+    label: 'Role bindings',
+    singular: 'RoleBinding',
+    namespaced: true,
+    icon: 'link',
+    group: 'access',
+    columns: [
+      NAME,
+      NAMESPACE,
+      { key: 'status', label: 'Status' },
+      { key: 'role', label: 'Role' },
+      { key: 'subjects', label: 'Subjects' },
+      AGE
+    ]
+  },
+  {
+    id: 'clusterroles',
+    label: 'Cluster roles',
+    singular: 'ClusterRole',
+    namespaced: false,
+    icon: 'lock',
+    group: 'access',
+    columns: [
+      NAME,
+      { key: 'rules', label: 'Rules', numeric: true },
+      { key: 'aggregation', label: 'Aggregation', secondary: true },
+      AGE
+    ]
+  },
+  {
+    id: 'clusterrolebindings',
+    label: 'Cluster role bindings',
+    singular: 'ClusterRoleBinding',
+    namespaced: false,
+    icon: 'link',
+    group: 'access',
+    columns: [
+      NAME,
+      { key: 'status', label: 'Status' },
+      { key: 'role', label: 'Role' },
+      { key: 'subjects', label: 'Subjects' },
+      AGE
+    ]
   }
 ];
+
+/**
+ * Other kinds a kind's rows are judged against. A binding is only broken
+ * relative to the roles that exist, and a webhook only relative to the
+ * Services behind it, so the panel lists these beside the kind itself and
+ * hands them to `toRow`. A list that could not be read — forbidden, or the
+ * API not served — is simply absent, and the check that needs it is skipped:
+ * a warning built on data nobody saw would be a false alarm.
+ */
+export const REFERENCES: Record<string, string[]> = {
+  rolebindings: ['roles', 'clusterroles'],
+  clusterrolebindings: ['clusterroles'],
+  validatingwebhookconfigurations: ['services', 'endpoints'],
+  mutatingwebhookconfigurations: ['services', 'endpoints']
+};
+
+/** The lists named by `REFERENCES`, by kind id. */
+export type Refs = Record<string, k.KubeObject[]>;
 
 /**
  * The namespace is the first thing you read a namespaced row by, so it leads
@@ -633,9 +790,9 @@ export function kindById(id: string): ResourceKind | undefined {
   return KINDS.find((kind) => kind.id === id);
 }
 
-export function toRow(kindId: string, object: k.KubeObject): Row {
+export function toRow(kindId: string, object: k.KubeObject, refs: Refs = {}): Row {
   const base = { name: object.metadata.name, namespace: object.metadata.namespace };
-  const built = build(kindId, object);
+  const built = build(kindId, object, refs);
   const owner = ownerOf(object);
   const cells: Record<string, string> = {
     name: base.name,
@@ -691,7 +848,7 @@ interface Built {
   terminatingGrace?: number;
 }
 
-function build(kindId: string, object: k.KubeObject): Built {
+function build(kindId: string, object: k.KubeObject, refs: Refs): Built {
   switch (kindId) {
     case 'pods':
       return buildPod(object);
@@ -739,6 +896,21 @@ function build(kindId: string, object: k.KubeObject): Built {
       return buildPv(object);
     case 'storageclasses':
       return buildStorageClass(object);
+    case 'poddisruptionbudgets':
+      return buildPdb(object);
+    case 'priorityclasses':
+      return buildPriorityClass(object);
+    case 'ingressclasses':
+      return buildIngressClass(object);
+    case 'validatingwebhookconfigurations':
+    case 'mutatingwebhookconfigurations':
+      return buildWebhookConfiguration(object, refs);
+    case 'roles':
+    case 'clusterroles':
+      return buildRole(object);
+    case 'rolebindings':
+    case 'clusterrolebindings':
+      return buildBinding(object, refs);
     default:
       return { health: 'muted', status: '', cells: {} };
   }
@@ -1490,6 +1662,211 @@ function buildStorageClass(storageClass: k.KubeObject): Built {
       reclaim: (storageClass as any).reclaimPolicy ?? 'Delete',
       binding: (storageClass as any).volumeBindingMode ?? 'Immediate',
       expansion: (storageClass as any).allowVolumeExpansion ? 'yes' : 'no'
+    }
+  };
+}
+
+function buildPdb(budget: k.KubeObject): Built {
+  const status = budget.status ?? {};
+  const current = Number(status.currentHealthy ?? 0);
+  const desired = Number(status.desiredHealthy ?? 0);
+  const allowed = Number(status.disruptionsAllowed ?? 0);
+  const expected = Number(status.expectedPods ?? 0);
+
+  // Zero allowed disruptions is what makes a drain sit for minutes, but it only
+  // explains something while the pods are healthy. Below the minimum the budget
+  // is not the cause, the workload is; and a budget that selects no pods
+  // protects nothing, so it is grey rather than a warning about a number that
+  // cannot be anything else.
+  let health: Health = 'ok';
+  let word = 'Allowed';
+  if (expected === 0) {
+    health = 'muted';
+    word = 'No pods';
+  } else if (current < desired) {
+    health = 'bad';
+    word = 'Below minimum';
+  } else if (allowed === 0) {
+    health = 'warn';
+    word = 'Blocking';
+  }
+
+  const bound = (value: unknown): string => (value === undefined ? 'N/A' : String(value));
+  return {
+    health,
+    status: word,
+    cells: {
+      status: word,
+      minAvailable: bound(budget.spec?.minAvailable),
+      maxUnavailable: bound(budget.spec?.maxUnavailable),
+      allowed: String(allowed),
+      healthy: `${current}/${desired}`
+    }
+  };
+}
+
+function buildPriorityClass(priority: k.KubeObject): Built {
+  const isDefault = Boolean((priority as any).globalDefault);
+  return {
+    health: 'ok',
+    status: isDefault ? 'Default' : 'Available',
+    cells: {
+      value: String((priority as any).value ?? 0),
+      default: isDefault ? 'yes' : 'no',
+      // Never is the one that changes behaviour: pods of the class wait for
+      // room rather than evicting lower-priority ones.
+      preemption: (priority as any).preemptionPolicy ?? 'PreemptLowerPriority',
+      description: String((priority as any).description ?? '').replace(/\s+/g, ' ').trim()
+    }
+  };
+}
+
+function buildIngressClass(ingressClass: k.KubeObject): Built {
+  const annotations = ingressClass.metadata.annotations ?? {};
+  const isDefault = annotations['ingressclass.kubernetes.io/is-default-class'] === 'true';
+  const parameters = ingressClass.spec?.parameters;
+  return {
+    health: 'ok',
+    status: isDefault ? 'Default' : 'Available',
+    cells: {
+      controller: ingressClass.spec?.controller ?? '',
+      default: isDefault ? 'yes' : 'no',
+      parameters: parameters ? `${parameters.kind}/${parameters.name}` : '<none>'
+    }
+  };
+}
+
+const WEBHOOK_RANK: Record<Health, number> = { ok: 0, muted: 0, warn: 1, bad: 2 };
+
+/**
+ * A webhook configuration is judged by whether the API server can reach what it
+ * calls. A `Fail` policy turns an unreachable webhook into a rejection of every
+ * create or update it matches, with an error that names the webhook rather than
+ * the Service behind it, so this is the row that explains it. `Ignore` lets the
+ * request through, so an unreachable target there is shown but not graded.
+ *
+ * Only a Service target can be checked from here; a `url` is somewhere outside
+ * the cluster. The worst webhook in the configuration sets the row's health.
+ */
+function buildWebhookConfiguration(config: k.KubeObject, refs: Refs): Built {
+  const hooks: any[] = (config as any).webhooks ?? [];
+  let health: Health = 'ok';
+  let word = 'Active';
+  const policies = new Set<string>();
+  const targets: string[] = [];
+
+  for (const hook of hooks) {
+    // `failurePolicy` defaults to Fail in admissionregistration.k8s.io/v1.
+    const policy: string = hook.failurePolicy ?? 'Fail';
+    policies.add(policy);
+    const service = hook.clientConfig?.service;
+    if (!service) {
+      targets.push(hostOf(hook.clientConfig?.url));
+      continue;
+    }
+    const target = `${service.namespace}/${service.name}`;
+    const problem = serviceProblem(service.namespace, service.name, refs);
+    targets.push(problem ? `${target} (${problem})` : target);
+    if (!problem || policy !== 'Fail') continue;
+    const verdict: Health = problem === 'not found' ? 'bad' : 'warn';
+    if (WEBHOOK_RANK[verdict] > WEBHOOK_RANK[health]) {
+      health = verdict;
+      word = problem === 'not found' ? 'Service missing' : 'No endpoints';
+    }
+  }
+
+  const unique = [...new Set(targets.filter(Boolean))];
+  const shown = unique.slice(0, 3).join(', ');
+  return {
+    health,
+    status: word,
+    cells: {
+      status: word,
+      webhooks: String(hooks.length),
+      policy: [...policies].join(', ') || '<none>',
+      targets: unique.length > 3 ? `${shown} +${unique.length - 3} more` : shown || '<none>'
+    }
+  };
+}
+
+/** The host of a webhook's external `url`, which is all the table has room for. */
+function hostOf(url: unknown): string {
+  try {
+    return new URL(String(url)).host;
+  } catch {
+    return String(url ?? '');
+  }
+}
+
+/**
+ * What is wrong with the Service behind a webhook, or undefined when nothing
+ * is — or when it cannot be told because the lists were not read.
+ */
+function serviceProblem(namespace: string, name: string, refs: Refs): 'not found' | 'no endpoints' | undefined {
+  const same = (o: k.KubeObject) => o.metadata.name === name && o.metadata.namespace === namespace;
+  if (refs.services && !refs.services.some(same)) return 'not found';
+  if (refs.endpoints) {
+    const endpoints = refs.endpoints.find(same);
+    const ready = ((endpoints as any)?.subsets ?? []).some((s: any) => (s.addresses ?? []).length > 0);
+    if (!ready) return 'no endpoints';
+  }
+  return undefined;
+}
+
+const AGGREGATE_PREFIX = 'rbac.authorization.k8s.io/aggregate-to-';
+
+function buildRole(role: k.KubeObject): Built {
+  const rules = ((role as any).rules ?? []).length;
+  const selectors: any[] = (role as any).aggregationRule?.clusterRoleSelectors ?? [];
+  // Two directions of the same mechanism: a role can be assembled from others
+  // by selector, and can carry the label that puts it into another. Both
+  // explain rules that are not written on the object itself.
+  const from = selectors.flatMap((s) => Object.entries(s.matchLabels ?? {}).map(([key, value]) => `${key.replace('rbac.authorization.k8s.io/', '')}=${value}`));
+  const feeds = Object.entries(role.metadata.labels ?? {})
+    .filter(([key, value]) => key.startsWith(AGGREGATE_PREFIX) && value === 'true')
+    .map(([key]) => key.slice(AGGREGATE_PREFIX.length));
+  const aggregation = [
+    from.length ? `from ${from.join(', ')}` : '',
+    feeds.length ? `into ${feeds.join(', ')}` : ''
+  ].filter(Boolean).join(' · ');
+
+  // An aggregated role's rules are filled in by a controller, so having none
+  // yet is not the same as having none at all.
+  const empty = rules === 0 && selectors.length === 0;
+  return {
+    health: empty ? 'muted' : 'ok',
+    status: empty ? 'No rules' : `${rules} rule${rules === 1 ? '' : 's'}`,
+    cells: { rules: String(rules), aggregation }
+  };
+}
+
+function buildBinding(binding: k.KubeObject, refs: Refs): Built {
+  const ref = (binding as any).roleRef ?? {};
+  const subjects: any[] = (binding as any).subjects ?? [];
+  const role = `${ref.kind ?? 'Role'}/${ref.name ?? ''}`;
+
+  // A binding to a role that does not exist grants nothing, and nothing else
+  // in the tables shows that. A RoleBinding may point at either kind of role,
+  // and a Role is looked for in the binding's own namespace.
+  const roles = ref.kind === 'ClusterRole' ? refs.clusterroles : refs.roles;
+  const dangling = roles !== undefined && !roles.some(
+    (r) => r.metadata.name === ref.name && (ref.kind === 'ClusterRole' || r.metadata.namespace === binding.metadata.namespace)
+  );
+
+  const names = subjects.map((s) =>
+    s.kind === 'ServiceAccount' ? `ServiceAccount/${s.namespace ?? binding.metadata.namespace ?? ''}/${s.name}` : `${s.kind}/${s.name}`
+  );
+  const shown = names.slice(0, 5).join(', ');
+  const rest = names.length - 5;
+
+  const word = dangling ? 'Role missing' : subjects.length === 0 ? 'No subjects' : 'Bound';
+  return {
+    health: dangling ? 'warn' : subjects.length === 0 ? 'muted' : 'ok',
+    status: word,
+    cells: {
+      status: word,
+      role,
+      subjects: names.length === 0 ? '<none>' : rest > 0 ? `${shown} +${rest} more` : shown
     }
   };
 }

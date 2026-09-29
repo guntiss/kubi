@@ -65,10 +65,11 @@ hand to a coding agent with the whole thing in view.
   | Group | Kinds |
   | --- | --- |
   | Cluster | Nodes, Namespaces, Events |
-  | Workloads | Pods, Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs, Autoscalers |
-  | Network | Services, Ingresses, Endpoints, Network policies |
-  | Config | ConfigMaps, Secrets, Service accounts, Resource quotas, Limit ranges |
+  | Workloads | Pods, Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs, Autoscalers, Disruption budgets |
+  | Network | Services, Ingresses, Ingress classes, Endpoints, Network policies |
+  | Config | ConfigMaps, Secrets, Service accounts, Resource quotas, Limit ranges, Priority classes, Validating webhooks, Mutating webhooks |
   | Storage | Volume claims, Volumes, Storage classes |
+  | Access | Roles, Role bindings, Cluster roles, Cluster role bindings |
 
   Tick rows for the bulk actions with their checkboxes, or drag across the
   table to draw a selection box, as on the desktop: a plain drag replaces the
@@ -108,8 +109,10 @@ hand to a coding agent with the whole thing in view.
 
 Every kind is judged on what actually goes wrong with it: a Deployment past its
 progress deadline, an autoscaler that cannot read its metrics, a Service with no
-ready endpoints, a quota at its limit, a namespace stuck `Terminating`.
-Something deliberately idle — a scaled-to-zero Deployment, a suspended CronJob, a
+ready endpoints, a quota at its limit, a namespace stuck `Terminating`, a
+disruption budget allowing no disruptions (the reason a drain sits waiting), a
+binding to a role that does not exist, a `Fail` webhook whose Service has no
+ready endpoints. Something deliberately idle — a scaled-to-zero Deployment, a suspended CronJob, a
 finished Job — reads grey rather than green, so the healthy count only covers
 what is really serving.
 

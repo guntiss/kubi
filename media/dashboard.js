@@ -896,7 +896,16 @@
     limitranges: '↕',
     persistentvolumeclaims: '◧',
     persistentvolumes: '■',
-    storageclasses: '≡'
+    storageclasses: '≡',
+    poddisruptionbudgets: '⊘',
+    priorityclasses: '⇧',
+    ingressclasses: '⌗',
+    validatingwebhookconfigurations: '✓',
+    mutatingwebhookconfigurations: '✎',
+    roles: '⚑',
+    rolebindings: '⊶',
+    clusterroles: '⚐',
+    clusterrolebindings: '⊷'
   };
 
   /**
@@ -2050,7 +2059,9 @@
     }
     const ratio = /^(\d+)\/(\d+)$/.exec(text);
     if (ratio) return Number(ratio[1]) / Math.max(1, Number(ratio[2]));
-    return /^\d+$/.test(text) ? Number(text) : null;
+    // Signed, for a priority class: system ones are in the billions and a
+    // negative one is how a workload is made the first to be preempted.
+    return /^-?\d+$/.test(text) ? Number(text) : null;
   }
 
   /**
