@@ -66,6 +66,15 @@ type Inbound =
       /** `replicas` is the count each row was showing, for the prompt's default. */
       targets: { name: string; namespace?: string; replicas?: number }[];
     }
+  /**
+   * CronJob actions. Trigger starts a Job from one CronJob and is confirmed
+   * here; suspend and resume flip `spec.suspend` on one or a ticked set.
+   */
+  | {
+      type: 'cronJobAction';
+      action: 'trigger' | 'suspend' | 'resume';
+      targets: { name: string; namespace?: string }[];
+    }
   /** A rollout restart, for one workload or a ticked set. Confirmed here. */
   | { type: 'restart'; kind: string; targets: { name: string; namespace?: string }[] }
   /** A port-forward for one pod, service or workload. Ports are picked here. */
@@ -587,6 +596,9 @@ export class DashboardPanel {
         break;
       case 'nodeAction':
         await this.nodeAction(message);
+        break;
+      case 'cronJobAction':
+        await this.cronJobAction(message);
         break;
       case 'scaleMany':
         await this.scaleMany(message);
@@ -1457,6 +1469,93 @@ export class DashboardPanel {
     } catch (err) {
       vscode.window.showErrorMessage(`Kubi: ${describeError(err)}`);
     }
+  }
+
+  /**
+   * CronJob actions: run one now, or suspend and resume any number.
+   *
+   * Suspend and resume only flip `spec.suspend`, are undone by each other, and
+   * run without asking, as cordon does. Trigger starts real work, so it is
+   * confirmed first, and afterwards offers to jump to the Job it made or to that
+   * Job's pods. It takes one CronJob: it is about the one you are looking at,
+   * and a bulk trigger would be a burst of Jobs nobody could check first.
+   *
+   * Each CronJob is its own kubectl call, as with restart: a patch takes one
+   * name, and a set spans namespaces.
+   */
+  private async cronJobAction(message: Extract<Inbound, { type: 'cronJobAction' }>): Promise<void> {
+    const { action, targets } = message;
+    if (!targets.length) {
+      return;
+    }
+    const ctx = this.contextName;
+    const labels = targets.map((t) => (t.namespace ? `${t.namespace}/${t.name}` : t.name));
+
+    if (action === 'trigger') {
+      const [target] = targets;
+      const confirmed = await vscode.window.showWarningMessage(
+        `Trigger cronjob "${labels[0]}" in context "${ctx}"?`,
+        {
+          modal: true,
+          detail: 'A Job is created from the CronJob\'s template and runs now, on top of its schedule. '
+            + 'It runs even if the CronJob is suspended.'
+        },
+        'Trigger now'
+      );
+      if (confirmed !== 'Trigger now') {
+        return;
+      }
+      let job: string;
+      try {
+        job = await k.triggerCronJob(target.name, ctx, target.namespace);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Kubi: ${describeError(err)}`);
+        return;
+      }
+      await this.load(this.activeKind);
+      // Not awaited: the toast stays up until it is dismissed, and this handler
+      // has nothing left to do after it.
+      void vscode.window
+        .showInformationMessage(`Kubi: started job ${job} from ${labels[0]}`, 'Show Job', 'Show Pods')
+        .then(async (choice) => {
+          try {
+            if (choice === 'Show Job') {
+              this.post({ type: 'reveal', kind: 'jobs', name: job, namespace: target.namespace });
+            } else if (choice === 'Show Pods') {
+              await this.showOwned({ kind: 'jobs', name: job, namespace: target.namespace });
+            }
+          } catch {
+            // The panel was closed while the toast was open; nothing to show it in.
+          }
+        });
+      return;
+    }
+
+    const suspend = action === 'suspend';
+    const verb = suspend ? 'suspended' : 'resumed';
+    const noun = targets.length === 1 ? 'cronjob' : 'cronjobs';
+    let done = 0;
+    const failures: string[] = [];
+    for (const [i, target] of targets.entries()) {
+      try {
+        await k.suspendCronJob(target.name, suspend, ctx, target.namespace);
+        done += 1;
+      } catch (err) {
+        failures.push(`${labels[i]}: ${describeError(err)}`);
+      }
+    }
+    if (failures.length) {
+      vscode.window.showErrorMessage(
+        targets.length === 1
+          ? `Kubi: ${failures[0]}`
+          : `Kubi: ${verb} ${done} of ${targets.length}; ${failures.join('; ')}`
+      );
+    } else {
+      vscode.window.showInformationMessage(
+        `Kubi: ${verb} ${targets.length === 1 ? `${noun} ${labels[0]}` : `${done} ${noun}`}`
+      );
+    }
+    await this.load(this.activeKind);
   }
 
   /**

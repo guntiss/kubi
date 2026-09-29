@@ -129,6 +129,8 @@ export interface Row {
   replicas?: number;
   /** Nodes only: `spec.unschedulable`, so the menu can offer Cordon or Uncordon. */
   unschedulable?: boolean;
+  /** CronJobs only: `spec.suspend`, so the menu can offer Suspend or Resume. */
+  suspended?: boolean;
   /**
    * Secrets only: the names of the keys under `data`, so the drawer can offer
    * Reveal and Copy per key. Names only; a value is fetched on demand and never
@@ -653,6 +655,7 @@ export function toRow(kindId: string, object: k.KubeObject): Row {
     ...(built.containers ? { containers: built.containers } : {}),
     ...(built.replicas !== undefined ? { replicas: built.replicas } : {}),
     ...(built.unschedulable ? { unschedulable: true } : {}),
+    ...(built.suspended ? { suspended: true } : {}),
     ...(built.secretKeys ? { secretKeys: built.secretKeys } : {}),
     ...(built.terminating ? { terminating: built.terminating } : {}),
     ...(built.terminatingGrace ? { terminatingGrace: built.terminatingGrace } : {}),
@@ -682,6 +685,7 @@ interface Built {
   containers?: ContainerInfo[];
   replicas?: number;
   unschedulable?: boolean;
+  suspended?: boolean;
   secretKeys?: string[];
   terminating?: string;
   terminatingGrace?: number;
@@ -1221,6 +1225,7 @@ function buildCronJob(job: k.KubeObject): Built {
     // a schedule someone expects to be firing is not, so it does not read green.
     health: suspended ? 'muted' : 'ok',
     status: suspended ? 'Suspended' : active > 0 ? 'Running' : 'Scheduled',
+    suspended,
     cells: {
       status: suspended ? 'Suspended' : active > 0 ? 'Running' : 'Scheduled',
       schedule: job.spec?.schedule ?? '',

@@ -87,7 +87,10 @@ hand to a coding agent with the whole thing in view.
   port from the spec, edit the local port (0 for any free one), and it runs in a
   terminal you close to stop it, with an Open in Browser button once it listens.
   Nodes add Cordon or Uncordon, and Drain, which confirms and then runs in a
-  terminal. The same actions are on a row's right-click menu; with several rows
+  terminal. CronJobs add Trigger now, which confirms and then creates a Job from
+  the CronJob's template, offering to jump to that Job or to its pods, and
+  Suspend or Resume, whichever changes something; both of those also work on
+  several ticked rows. The same actions are on a row's right-click menu; with several rows
   ticked, the menu offers the bulk actions instead.
 
   The **Events** section lists everything the cluster recorded about the selected
@@ -227,8 +230,9 @@ and `npm run package` then fails.
 ## Status
 
 Early but usable: read-mostly across the standard resource types. Delete, scale,
-restart, cordon, drain and `kubectl edit` are the only mutating actions; delete,
-restart and drain always confirm first, as does a scale to zero.
+restart, cordon, drain, trigger, suspend and `kubectl edit` are the only mutating
+actions; delete, restart, drain and trigger always confirm first, as does a scale
+to zero.
 
 Expect rough edges, and please
 [open an issue](https://github.com/guntiss/kubi/issues) when you find one —

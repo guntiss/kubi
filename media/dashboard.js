@@ -3420,6 +3420,19 @@
         targets: rows.map((row) => ({ name: row.name, namespace: row.namespace }))
       })
     },
+    ...['suspend', 'resume'].map((id) => ({
+      id,
+      applies: (kind) => Boolean(kind && kind.id === 'cronjobs'),
+      label: (rows) => `${id === 'suspend' ? 'Suspend' : 'Resume'} ${rows.length}`,
+      title: (rows, noun) => id === 'suspend'
+        ? `Stop the ${rows.length} selected ${noun} from starting new jobs`
+        : `Let the ${rows.length} selected ${noun} start jobs on their schedules again`,
+      run: (rows) => post({
+        type: 'cronJobAction',
+        action: id,
+        targets: rows.map((row) => ({ name: row.name, namespace: row.namespace }))
+      })
+    })),
     ...['cordon', 'uncordon', 'drain'].map((id) => ({
       id,
       applies: (kind) => Boolean(kind && kind.id === 'nodes'),
@@ -3672,6 +3685,20 @@
         run: node('drain'),
         title: 'Cordon the node and evict its pods, in a terminal'
       });
+    }
+    // Only the one of Suspend and Resume that would change something is offered.
+    if (kind.id === 'cronjobs') {
+      const cron = (action) => () => post({
+        type: 'cronJobAction', action, targets: [{ name: row.name, namespace: row.namespace }]
+      });
+      actions.push({
+        label: 'Trigger now',
+        run: cron('trigger'),
+        title: 'Create a Job from this CronJob\'s template and run it now'
+      });
+      actions.push(row.suspended
+        ? { label: 'Resume', run: cron('resume'), title: 'Let this CronJob start jobs on its schedule again' }
+        : { label: 'Suspend', run: cron('suspend'), title: 'Stop this CronJob from starting new jobs' });
     }
     if (kind.forwardable) {
       actions.push({
@@ -4613,6 +4640,18 @@
         state.error = '';
         if (!message.stale) state.refreshError = '';
         state.generated = message.generated;
+        render();
+        break;
+      case 'reveal':
+        // Jump to one object's table, narrowed to its name. The extension sends
+        // this for a Job it has just created, so the row is found by the
+        // ordinary filter rather than by a lookup that would race the refresh.
+        select(message.kind);
+        state.filter = message.name;
+        if (state.namespace !== (message.namespace ?? state.allNamespaces)) {
+          state.namespace = message.namespace ?? state.allNamespaces;
+          post({ type: 'setNamespace', namespace: state.namespace });
+        }
         render();
         break;
       case 'scope':

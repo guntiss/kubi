@@ -561,6 +561,36 @@ export function cordon(names: string[], context: string, schedulable = false): P
 }
 
 /**
+ * Starts a Job from a CronJob's template right now, the way `kubectl create
+ * job --from` does, and returns the new Job's name.
+ *
+ * The name is `<cronjob>-manual-<unix seconds>`, cut to 63 characters: a Job's
+ * name is stamped onto its pods as the `job-name` label, and a label value
+ * cannot be longer. It is the CronJob's name that gives way, since the suffix is
+ * what keeps two triggers apart.
+ */
+export async function triggerCronJob(name: string, context: string, namespace?: string): Promise<string> {
+  const suffix = `-manual-${Math.floor(Date.now() / 1000)}`;
+  const prefix = name.slice(0, 63 - suffix.length).replace(/[-.]+$/, '');
+  const job = `${prefix}${suffix}`;
+  await run(['create', 'job', job, `--from=cronjob/${name}`, ...scopeArgs(namespace)], context, 60000);
+  return job;
+}
+
+/**
+ * Sets `spec.suspend` on a CronJob. kubectl has no verb for it, so it is a
+ * patch; a suspended CronJob starts nothing new, and Jobs already running are
+ * left to finish.
+ */
+export function suspendCronJob(name: string, suspend: boolean, context: string, namespace?: string): Promise<string> {
+  return run(
+    ['patch', 'cronjob', name, ...scopeArgs(namespace), '-p', JSON.stringify({ spec: { suspend } })],
+    context,
+    60000
+  );
+}
+
+/**
  * Opens `kubectl edit` with VS Code itself as the editor. `code --wait` blocks
  * until the tab closes, which is what lets kubectl apply the result, so this
  * call stays pending for as long as the user has the file open — hence no
