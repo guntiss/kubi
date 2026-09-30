@@ -2372,10 +2372,10 @@ function dragToSelect(): boolean {
   return vscode.workspace.getConfiguration('kubi').get<boolean>('dragToSelect') ?? true;
 }
 
-/** Where a new dashboard opens, per `kubi.dashboardLocation`. */
+/** Which editor group a new dashboard opens in, per `kubi.dashboardEditorGroup`. */
 function dashboardColumn(): vscode.ViewColumn {
-  const where = vscode.workspace.getConfiguration('kubi').get<string>('dashboardLocation');
-  return where === 'inline' ? vscode.ViewColumn.Active : vscode.ViewColumn.Beside;
+  const group = vscode.workspace.getConfiguration('kubi').get<string>('dashboardEditorGroup');
+  return group === 'beside' ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active;
 }
 
 /**

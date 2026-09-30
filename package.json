@@ -137,18 +137,18 @@
           "default": true,
           "markdownDescription": "Offer Reveal and Copy for a Secret's values in its detail drawer. Values are fetched one key at a time, only when asked for, and never cached. Turn it off (for example in a workspace's settings) to keep Secret values out of the dashboard entirely."
         },
-        "kubi.dashboardLocation": {
+        "kubi.dashboardEditorGroup": {
           "type": "string",
           "enum": [
-            "newTab",
-            "inline"
+            "active",
+            "beside"
           ],
           "enumDescriptions": [
-            "Open each dashboard in its own editor group, beside the one you are working in.",
-            "Open each dashboard as a tab next to the others in the current editor group."
+            "Open each dashboard as a tab in the active editor group, next to the editors already there.",
+            "Open each dashboard in the editor group to the side of the active one, as Open to the Side does, creating that group if there is none."
           ],
-          "default": "newTab",
-          "description": "Where a new dashboard opens. Reopening a context that already has a dashboard reveals that one where it is."
+          "default": "active",
+          "description": "Which editor group a new dashboard opens in. Reopening a context that already has a dashboard reveals that one where it is."
         },
         "kubi.dragToSelect": {
           "type": "boolean",

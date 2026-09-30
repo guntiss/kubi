@@ -218,7 +218,7 @@ and `npm run package` then fails.
 | `kubi.editorCommand` | `code --wait` | Editor used as `KUBE_EDITOR` for `kubectl edit`. Must block until the file is closed. |
 | `kubi.autoRefreshSeconds` | `5` | Auto-refresh interval in seconds; `0` disables. Only visible dashboards refresh. |
 | `kubi.preserveCacheAfterUpdates` | `true` | Keep cached dashboard data when the extension updates, so the first dashboard opened after an update paints immediately. Turn it off if you would rather each update start empty: a view cached by an older build can paint blank cells until its first refresh replaces it. Also on the About page. |
-| `kubi.dashboardLocation` | `newTab` | Where a new dashboard opens: `newTab` in its own editor group beside the current one, or `inline` as a tab next to the others in the current group. |
+| `kubi.dashboardEditorGroup` | `active` | Which editor group a new dashboard opens in: `active` as a tab next to the editors already in the current group, or `beside` in the group to its side, as Open to the Side does. |
 | `kubi.dragToSelect` | `true` | Experimental: select table rows by dragging a selection box across them. |
 
 ## Roadmap
