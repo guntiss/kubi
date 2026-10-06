@@ -412,6 +412,9 @@ export class DashboardPanel {
         if (e.affectsConfiguration('kubi.dragToSelect')) {
           this.post({ type: 'dragToSelect', enabled: dragToSelect() });
         }
+        if (e.affectsConfiguration('kubi.tableSparklines')) {
+          this.post({ type: 'tableSparklines', enabled: tableSparklines() });
+        }
       })
     );
   }
@@ -739,7 +742,8 @@ export class DashboardPanel {
       railCollapsed: this.extension.globalState.get<boolean>(RAIL_COLLAPSED_KEY, false),
       railGroups: this.extension.globalState.get<Record<string, boolean>>(RAIL_GROUPS_KEY, {}),
       columnLayouts: this.extension.globalState.get<Record<string, ColumnLayout>>(COLUMN_LAYOUTS_KEY, {}),
-      dragToSelect: dragToSelect()
+      dragToSelect: dragToSelect(),
+      tableSparklines: tableSparklines()
     });
     // A webview reload loses its state but not the kubectl processes behind it,
     // so edits in flight have to be replayed or their buttons come back enabled.
@@ -2522,6 +2526,11 @@ function isKnownKind(id: string): boolean {
 /** Whether a drag across a table draws a selection box. On unless turned off. */
 function dragToSelect(): boolean {
   return vscode.workspace.getConfiguration('kubi').get<boolean>('dragToSelect') ?? true;
+}
+
+/** Whether the Nodes and Pods tables draw usage sparklines. Off unless turned on. */
+function tableSparklines(): boolean {
+  return vscode.workspace.getConfiguration('kubi').get<boolean>('tableSparklines') ?? false;
 }
 
 /** Which editor group a new dashboard opens in, per `kubi.dashboardEditorGroup`. */

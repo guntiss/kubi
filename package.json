@@ -149,6 +149,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable row selection by dragging."
+        },
+        "kubi.tableSparklines": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Draw a sparkline of the last ten minutes beside the CPU and memory readings in the Nodes and Pods tables. A row's sparkline appears only once a full ten minutes of readings has been recorded, so expect none for the first ten minutes after a dashboard opens. The detail drawer shows the usage history either way."
         }
       }
     }

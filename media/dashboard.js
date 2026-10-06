@@ -81,6 +81,11 @@
      * changes.
      */
     dragToSelect: true,
+    /**
+     * Whether usage cells draw a sparkline beside the reading
+     * (`kubi.tableSparklines`). Off by default; sent like `dragToSelect`.
+     */
+    tableSparklines: false,
     /** True until this kind has ever produced content (cached or fresh). */
     empty: true,
     /** Content on screen came from cache rather than a completed fetch. */
@@ -3692,7 +3697,8 @@
   /**
    * The inside of a usage cell: a sparkline and the reading, or for a share
    * column the percentage alone, coloured once it nears the ceiling. The
-   * sparkline waits for a full window of history; see `FULL_SPAN_MS`.
+   * sparkline is drawn only with `kubi.tableSparklines` on, and then waits for
+   * a full window of history; see `FULL_SPAN_MS`.
    */
   function metricCellContent(row, col, domain) {
     const u = row.usage;
@@ -3703,7 +3709,9 @@
       return reading.pct === null ? [] : [el('span', { class: 'metric-pct' + tone, text: formatPct(reading.pct) })];
     }
     const value = el('span', { class: 'metric-value' + tone, text: formatMetric(col.metric, reading.value) });
-    return hasFullHistory(u) ? [sparkline(u, col.metric, domain, 48, 16, ''), value] : [value];
+    return state.tableSparklines && hasFullHistory(u)
+      ? [sparkline(u, col.metric, domain, 48, 16, ''), value]
+      : [value];
   }
 
   function metricTitle(row, col) {
@@ -6580,6 +6588,7 @@
         state.railGroups = message.railGroups || {};
         state.columnLayouts = message.columnLayouts || {};
         state.dragToSelect = Boolean(message.dragToSelect);
+        state.tableSparklines = Boolean(message.tableSparklines);
         render();
         break;
       case 'columnLayouts':
@@ -6620,6 +6629,13 @@
         state.dragToSelect = Boolean(message.enabled);
         // Turned off mid-drag: drop the box, keeping whatever it had ticked.
         if (!state.dragToSelect) endMarquee();
+        break;
+      case 'tableSparklines':
+        // A rebuild rather than a reconcile: the usage columns are measured
+        // when the table is built, and need measuring again with or without
+        // the sparklines in them.
+        state.tableSparklines = Boolean(message.enabled);
+        render();
         break;
       case 'namespace':
         // Restores the saved preference at startup. Rows span all namespaces

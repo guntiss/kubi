@@ -126,11 +126,13 @@ hand to a coding agent with the whole thing in view.
   from one of its pods, as `kubectl logs deployment/…` picks it. The **Logs**
   buttons still open a terminal.
 
-- **CPU and memory** — Nodes and Pods show live usage with a sparkline of the
-  last ten minutes, once a full ten minutes has been recorded. Beside each,
+- **CPU and memory** — Nodes and Pods show live usage. Beside each reading,
   **CPU %** and **MEM %** give the usage as a share of the pod's limits or the
-  node's allocatable; they turn yellow at 75% and red at 90%. The drawer draws
-  the same history larger, and breaks pod usage down per container. Needs
+  node's allocatable; they turn yellow at 75% and red at 90%. The drawer charts
+  the last ten minutes of usage, and breaks pod usage down per container. Turn
+  on `kubi.tableSparklines` to draw that history as a sparkline beside each
+  reading in the table too; a row's sparkline appears only once a full ten
+  minutes has been recorded, so there are none for the first ten minutes. Needs
   [metrics-server](https://github.com/kubernetes-sigs/metrics-server) in the
   cluster; without it the columns simply do not appear. The history is what
   the dashboard has seen since it opened, as metrics-server keeps none.
@@ -254,6 +256,7 @@ settings editor.
 | `kubi.preserveCacheAfterUpdates` | `true` | Keep cached dashboard data when the extension updates, so the first dashboard opened after an update paints immediately. Turn it off if you would rather each update start empty: a view cached by an older build can paint blank cells until its first refresh replaces it. Also on the About page. |
 | `kubi.dashboardEditorGroup` | `active` | Which editor group a new dashboard opens in: `active` as a tab next to the editors already in the current group, or `beside` in the group to its side, as Open to the Side does. |
 | `kubi.dragToSelect` | `true` | Select table rows by dragging a selection box across them. |
+| `kubi.tableSparklines` | `false` | Draw a sparkline of the last ten minutes beside the CPU and memory readings in the Nodes and Pods tables. A row's sparkline appears only once a full ten minutes of readings has been recorded, so there are none for the first ten minutes after a dashboard opens. |
 
 ## Roadmap
 
