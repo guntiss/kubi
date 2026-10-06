@@ -125,6 +125,19 @@ export interface Row {
   /** Pods only: what is actually running inside, for the details modal. */
   containers?: ContainerInfo[];
   /**
+   * Workloads whose logs kubectl reads as `kind/name` only: the containers of
+   * their pod template, which every pod they run has, so the Logs tab can
+   * offer a choice before kubectl has picked a pod. A pod's own come from
+   * `containers` instead.
+   */
+  logContainers?: { name: string; kind: 'init' | 'app' }[];
+  /**
+   * Pods and those workloads: the `kubectl.kubernetes.io/default-container`
+   * annotation, the container kubectl reads when none is named. The Logs tab
+   * opens on it, so it starts on the same log the terminal would.
+   */
+  defaultContainer?: string;
+  /**
    * Scalable kinds only: `spec.replicas` as a number, so the scale prompt can
    * open on the count that is actually set. Kept apart from the `ready` cell,
    * which is display text ("3/5") and rounds a missing spec to 0.
@@ -851,6 +864,7 @@ export function toRow(kindId: string, object: k.KubeObject, refs: Refs = {}): Ro
     cells,
     search: Object.values(cells).join(' ').toLowerCase(),
     ...(built.containers ? { containers: built.containers } : {}),
+    ...logFields(kindId, object),
     ...(built.replicas !== undefined ? { replicas: built.replicas } : {}),
     ...(built.unschedulable ? { unschedulable: true } : {}),
     ...(built.suspended ? { suspended: true } : {}),
@@ -859,6 +873,36 @@ export function toRow(kindId: string, object: k.KubeObject, refs: Refs = {}): Ro
     ...(built.terminatingGrace ? { terminatingGrace: built.terminatingGrace } : {}),
     ...(owner ? { owner } : {}),
     ...(object.metadata.uid ? { uid: object.metadata.uid } : {})
+  };
+}
+
+/** The workload kinds `kubectl logs` accepts as `kind/name`. */
+const LOG_WORKLOADS = new Set(['deployments', 'statefulsets', 'daemonsets', 'replicasets']);
+
+/** The annotation kubectl reads to choose a container when none is named. */
+const DEFAULT_CONTAINER = 'kubectl.kubernetes.io/default-container';
+
+/**
+ * What the Logs tab needs beyond a pod's own containers: the default
+ * container for pods, and for workloads their template's containers as well.
+ * Ephemeral containers are left out of a template — they are added to a
+ * running pod, never declared on the workload.
+ */
+function logFields(kindId: string, object: k.KubeObject): Pick<Row, 'logContainers' | 'defaultContainer'> {
+  if (kindId === 'pods') {
+    const annotated = object.metadata.annotations?.[DEFAULT_CONTAINER];
+    return annotated ? { defaultContainer: annotated } : {};
+  }
+  if (!LOG_WORKLOADS.has(kindId)) return {};
+  const template = object.spec?.template ?? {};
+  const spec = template.spec ?? {};
+  const annotated = template.metadata?.annotations?.[DEFAULT_CONTAINER];
+  return {
+    logContainers: [
+      ...(spec.initContainers ?? []).map((c: any) => ({ name: String(c.name), kind: 'init' as const })),
+      ...(spec.containers ?? []).map((c: any) => ({ name: String(c.name), kind: 'app' as const }))
+    ],
+    ...(annotated ? { defaultContainer: annotated } : {})
   };
 }
 

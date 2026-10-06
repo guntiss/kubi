@@ -1553,6 +1553,78 @@ td.metric .metric-pct.bad { color: var(--bad); font-weight: 600; }
   background: color-mix(in srgb, var(--warn) 18%, transparent);
 }
 
+/* ---------- logs tab ---------- */
+
+/*
+ * The Logs tab stands where the body does: a toolbar over a scroller, with
+ * only the lines moving, so the picker and toggles stay in reach however far
+ * back someone has scrolled.
+ */
+.logs-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.logs-toolbar {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.logs-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+select.logs-container { flex: 1; min-width: 0; }
+.logs-toolbar input.logs-filter { width: 180px; flex: none; }
+
+/*
+ * On/off switches, in the look VS Code gives its own (Match Case in the find
+ * widget): quiet when off, outlined and tinted when on.
+ */
+.logs-toggle, .logs-reconnect { font-size: 0.85em; padding: 2px 9px; }
+.logs-toggle { background: transparent; color: var(--muted); }
+.logs-toggle[aria-pressed="true"] {
+  color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground));
+  background: var(--vscode-inputOption-activeBackground, rgba(128, 128, 128, 0.2));
+  border-color: var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder));
+}
+.logs-toggle[disabled] { opacity: 0.45; cursor: default; }
+.logs-toggle[disabled]:hover { background: transparent; }
+
+.logs-status { font-size: 0.85em; color: var(--muted); white-space: nowrap; }
+.logs-status.error { color: var(--bad); }
+/* A live stream gets the dot a recording does, in the colour of a healthy pod. */
+.logs-status.live::before {
+  content: '';
+  display: inline-block;
+  width: 7px; height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  vertical-align: 1px;
+}
+
+/*
+ * The lines, on the terminal's own background so they read as the output they
+ * are. Unwrapped, the scroller runs sideways too; wrapped, a long line breaks
+ * anywhere rather than pushing the pane wide.
+ */
+.modal .logs-body {
+  padding: 8px 12px;
+  overflow: auto;
+  background: var(--vscode-terminal-background, var(--vscode-editor-background));
+  color: var(--vscode-terminal-foreground, var(--vscode-foreground));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.85em;
+  line-height: 1.45;
+}
+.logs-text { width: max-content; min-width: 100%; }
+.log-line { white-space: pre; min-height: 1.45em; }
+.logs-pane.wrap .logs-text { width: auto; }
+.logs-pane.wrap .log-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-ts { display: none; color: var(--muted); }
+.logs-pane.show-ts .log-ts { display: inline; }
+.logs-note { color: var(--muted); font-style: italic; padding: 2px 0; }
+.logs-note.error {
+  color: var(--vscode-errorForeground, var(--bad));
+  font-style: normal;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .modal .actions {
   display: flex; flex-wrap: wrap; gap: 8px;
   padding: 12px 16px; border-top: 1px solid var(--border);

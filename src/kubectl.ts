@@ -1,4 +1,4 @@
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -468,6 +468,62 @@ function runWithStdin(args: string[], input: string, timeoutMs = 30000): Promise
     child.stdin?.on('error', () => undefined);
     child.stdin?.end(input);
   });
+}
+
+/** A running `kubectl logs`; see streamLogs. */
+export interface LogStream {
+  /** Kills the process. `onExit` is not called for a stream stopped this way. */
+  stop(): void;
+}
+
+/**
+ * Runs `kubectl logs` and hands its output on as it arrives, for the drawer's
+ * Logs tab. Unlike `run` nothing waits for the end: a followed log has none, so
+ * stdout is passed along chunk by chunk and the process lives until `stop`, or
+ * until kubectl exits on its own — the container finishing, which ends a
+ * follow cleanly, or a failure, whose stderr `onExit` reports.
+ *
+ * stderr is only read on failure. kubectl writes notes there on success too
+ * ("Defaulted container …"), and those are not the log.
+ */
+export function streamLogs(
+  args: string[],
+  context: string,
+  onData: (text: string) => void,
+  onExit: (error?: string) => void
+): LogStream {
+  const child = spawn(binary(), withKubeconfig(['--context', context, 'logs', ...args]), {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let stderr = '';
+  let done = false;
+  // Decoded by the streams, so a multi-byte character split across two
+  // chunks arrives whole rather than as two halves of mojibake.
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => {
+    if (!done) onData(chunk);
+  });
+  child.stderr.on('data', (chunk: string) => {
+    // Bounded: only the tail is ever reported, and a chatty failure should not
+    // grow without limit while it runs.
+    stderr = (stderr + chunk).slice(-8192);
+  });
+  const finish = (error?: string) => {
+    if (done) return;
+    done = true;
+    onExit(error);
+  };
+  // A binary that cannot be started reports here, with no exit code to read.
+  child.on('error', (err) => finish(err.message));
+  child.on('close', (code) => finish(code === 0 ? undefined : stderr.trim() || `kubectl logs exited with code ${code}`));
+  return {
+    stop() {
+      if (done) return;
+      done = true;
+      child.kill();
+    }
+  };
 }
 
 /**

@@ -139,7 +139,7 @@
      * Which tab the details panel is showing. Reset to the overview whenever
      * the selection changes, so a new row never opens straight onto the tab
      * that costs a fetch.
-     * @type {'details' | 'describe'}
+     * @type {'details' | 'describe' | 'logs'}
      */
     detailTab: 'details',
     /**
@@ -311,6 +311,7 @@
   function selectRow(row) {
     state.selected = row;
     clearSecretValues();
+    stopLogStream();
     state.detailTab = 'details';
     state.describe = newDescribe();
     state.events = newObjectEvents();
@@ -326,6 +327,10 @@
    * Switches the panel's tab, fetching describe output the first time its tab
    * is opened for this row. The extension replays its cached text before
    * refreshing, so a row looked at before usually paints without a wait.
+   *
+   * Logs start streaming the first time their tab is opened, and keep going
+   * while another tab is looked at: coming back finds them caught up rather
+   * than starting over. They stop with the selection.
    */
   function openDetailTab(tab) {
     state.detailTab = tab;
@@ -335,6 +340,7 @@
       state.describe.loading = true;
       post({ type: 'describe', kind: state.active, name: row.name, namespace: row.namespace });
     }
+    if (tab === 'logs' && row) ensureLogView(row);
     renderContentOnly();
   }
 
@@ -658,6 +664,7 @@
     const rail = app.querySelector('.rail-scroll');
     if (rail) rail.scrollTop = railScroll;
     restoreDetailScroll(detail);
+    settleLogScroll();
     restoreSearchFocus(caret);
     syncNsMenu();
     syncKindMenu();
@@ -2041,6 +2048,7 @@
     next.scrollTop = scroll;
     next.scrollLeft = scrollX;
     restoreDetailScroll(detail);
+    settleLogScroll();
     // The action bar is a sibling of the content, not part of it, but it
     // reports on the same rows — so it is refreshed in step. Ticking a row goes
     // through here, and the count would otherwise go stale.
@@ -2065,14 +2073,19 @@
     const hasModal = Boolean(content.querySelector('.modal'));
     if (hasModal !== Boolean(state.selected)) return false;
     // While one is open its contents track the selected row, which is not
-    // something the table reconciler knows how to update.
-    if (hasModal) return false;
+    // something the table reconciler knows how to update. The Logs tab is the
+    // exception, and has to be: a rebuild would close its container picker
+    // mid-choice and take the focus out of its filter on every refresh. Its
+    // pane keeps itself current, so only the action bar beside it is redrawn.
+    const keepLogs = hasModal && logsOnScreen(content);
+    if (hasModal && !keepLogs) return false;
 
     const table = content.querySelector('table');
     if (!table) return false;
     const columns = tableColumns(kind);
     const rows = visibleRows();
     if (!reconcileTable(table, rows, columns)) return false;
+    if (keepLogs) refreshLogsDrawer(content);
 
     // The header carries the sort arrow, and sorting comes through this path.
     updateTableHeader(table, columns, rows);
@@ -5125,12 +5138,6 @@
     const usage = currentRow(row)?.usage;
 
     const act = (action, container) => () => post(actionMessage(kind, row, action, container));
-    const actions = objectActions(kind, row).map((a) => el('button', {
-      class: a.variant,
-      onclick: a.run,
-      disabled: a.disabled,
-      title: a.title
-    }, a.label));
 
     // An event's name is a generated hash; its reason and target are what
     // identify it to a reader, so they take the heading.
@@ -5142,9 +5149,11 @@
 
     const close = () => { selectRow(null); renderContentOnly(); };
 
-    // Both tabs exist for every kind, including events, which have no
-    // containers: a strip that changes shape per kind moves the Describe tab
-    // out from under the pointer as you step between rows.
+    // Details and Describe exist for every kind, including events, which have
+    // no containers: a strip that changes shape per kind moves the Describe tab
+    // out from under the pointer as you step between rows. Logs only exist for
+    // some kinds, so their tab comes last, where it moves nothing.
+    const logs = hasLogs(kind.id);
     const tab = (id, label) => el('button', {
       class: 'tab' + (state.detailTab === id ? ' active' : ''),
       role: 'tab',
@@ -5171,22 +5180,38 @@
           ),
           el('button', { class: 'close', title: 'Close', onclick: close }, '×')
         ),
-        el('div', { class: 'tabs', role: 'tablist' }, tab('details', 'Details'), tab('describe', 'Describe')),
+        el('div', { class: 'tabs', role: 'tablist' },
+          tab('details', 'Details'),
+          tab('describe', 'Describe'),
+          logs ? tab('logs', 'Logs') : null
+        ),
         state.detailTab === 'describe'
           ? renderDescribePane()
-          : el('div', { class: 'body' },
-              el('dl', {}, ...entries.flatMap(([label, value]) => [
-                el('dt', { text: label }),
-                el('dd', {}, label === 'Status' ? el('span', { class: 'pill ' + row.health }, value) : value)
-              ])),
-              renderUsage(kind, usage),
-              renderSecretData(row),
-              renderContainers(row, act, usage),
-              renderObjectEvents()
-            ),
-        el('div', { class: 'actions' }, ...actions)
+          : state.detailTab === 'logs' && logs
+            ? renderLogsPane(row)
+            : el('div', { class: 'body' },
+                el('dl', {}, ...entries.flatMap(([label, value]) => [
+                  el('dt', { text: label }),
+                  el('dd', {}, label === 'Status' ? el('span', { class: 'pill ' + row.health }, value) : value)
+                ])),
+                renderUsage(kind, usage),
+                renderSecretData(row),
+                renderContainers(row, act, usage),
+                renderObjectEvents()
+              ),
+        renderModalActions(kind, row)
       )
     );
+  }
+
+  /** The drawer's action bar: `objectActions`, as buttons. */
+  function renderModalActions(kind, row) {
+    return el('div', { class: 'actions' }, ...objectActions(kind, row).map((a) => el('button', {
+      class: a.variant,
+      onclick: a.run,
+      disabled: a.disabled,
+      title: a.title
+    }, a.label)));
   }
 
   /**
@@ -5615,6 +5640,506 @@
     return el('div', { class: 'body describe' }, note, body);
   }
 
+  // ---------- logs tab ----------
+
+  /**
+   * Kinds whose drawer has a Logs tab: pods, and the workloads kubectl reads
+   * as `kind/name` — the same ones whose Logs button opens a terminal.
+   */
+  function hasLogs(kindId) {
+    return kindId === 'pods' || WORKLOAD_TERMINALS.includes(kindId);
+  }
+
+  /**
+   * Lines the tab holds before the oldest are dropped. A follow can run for
+   * hours, and past this the webview pays more to keep every line than
+   * scrolling back that far is worth.
+   */
+  const MAX_LOG_LINES = 10000;
+
+  /**
+   * How logs are read rather than which log is showing, so these outlive the
+   * row: set once, they hold for every drawer until the dashboard is closed.
+   */
+  const logPrefs = { wrap: true, timestamps: false };
+
+  /**
+   * The Logs tab of the object in the drawer, or null while there is none.
+   * Kept outside `state` because it owns its DOM: lines arrive many times a
+   * second and are appended to one long-lived pane rather than redrawn, and a
+   * rebuild of the drawer is handed that pane as it is — so a refresh neither
+   * repaints thousands of lines nor loses them. See `newLogView`.
+   */
+  let logView = null;
+
+  /** Numbers each stream, so output from one since replaced is recognised and dropped. */
+  let lastLogId = 0;
+
+  /** Each line element's text, lowercased for the filter, without its timestamp or colour codes. */
+  const logLineText = new WeakMap();
+
+  /** kubectl's `--timestamps` prefix: RFC 3339 to the nanosecond, then a space. */
+  const LOG_TIMESTAMP = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(\.\d+)?(Z|[+-]\d\d:\d\d) /;
+
+  /**
+   * The containers the picker offers. A pod lists its own, init and ephemeral
+   * ones included, since those have logs too; a workload, its template's. A
+   * row cached by a build that carried neither offers none, and kubectl picks.
+   */
+  function logChoices(row) {
+    const live = currentRow(row);
+    if (live.containers) return live.containers.map((c) => ({ name: c.name, kind: c.kind }));
+    return live.logContainers || [];
+  }
+
+  /** The container kubectl would read unasked: the annotated default, else the first app one. */
+  function defaultLogContainer(row, choices) {
+    const annotated = currentRow(row).defaultContainer;
+    if (annotated && choices.some((c) => c.name === annotated)) return annotated;
+    return (choices.find((c) => c.kind === 'app') || choices[0] || { name: '' }).name;
+  }
+
+  /**
+   * Whether the container has a previous instance to read. A pod's restart
+   * count says; a workload's pod is picked by kubectl, so it is offered and
+   * kubectl reports it if there is none.
+   */
+  function canReadPrevious(view) {
+    if (view.kind !== 'pods') return true;
+    const container = (currentRow(view.row).containers || []).find((c) => c.name === view.container);
+    return !container || container.restarts > 0;
+  }
+
+  /** Opens the Logs tab on `row`, starting its stream, unless it is already open on it. */
+  function ensureLogView(row) {
+    if (logView && logView.key === rowKey(row)) return;
+    stopLogStream();
+    logView = newLogView(kindOf(state.active), row);
+    startLogStream();
+  }
+
+  /**
+   * Builds the Logs tab for one object: a toolbar, and the scroller its lines
+   * are written into. Nothing is fetched here; `startLogStream` does that.
+   */
+  function newLogView(kind, row) {
+    const choices = logChoices(row);
+    const view = {
+      kind: kind.id,
+      row,
+      key: rowKey(row),
+      id: 0,
+      container: defaultLogContainer(row, choices),
+      previous: false,
+      running: false,
+      error: '',
+      filter: '',
+      /** Keep the newest line in view. Off once the reader scrolls up, as in a terminal. */
+      follow: true,
+      /** Where the reader left the scroller, put back when the pane is reattached. */
+      top: 0,
+      left: 0,
+      /** Line elements held, and how many of them the filter lets through. */
+      count: 0,
+      shown: 0,
+      /** Text after the last newline, drawn as a line of its own until the rest arrives. */
+      partial: '',
+      partialLine: null
+    };
+
+    const toggle = (label, title, onclick) =>
+      el('button', { class: 'logs-toggle', 'aria-pressed': 'false', title, onclick }, label);
+    const workload = kind.id !== 'pods';
+    view.select = el('select', {
+      class: 'logs-container',
+      'aria-label': 'Container',
+      // kubectl reads a workload's log from one of its pods, of its choosing.
+      title: workload ? `Read from one of this ${kind.singular.toLowerCase()}'s pods, as kubectl picks it` : 'Container',
+      onchange: () => {
+        view.container = view.select.value;
+        if (view.previous && !canReadPrevious(view)) view.previous = false;
+        startLogStream();
+      }
+    });
+    view.filterInput = el('input', {
+      class: 'search logs-filter',
+      type: 'search',
+      placeholder: 'Filter',
+      'aria-label': 'Filter log lines',
+      spellcheck: 'false',
+      oninput: () => applyLogFilter(view.filterInput.value),
+      onkeydown: (e) => {
+        // Escape empties the filter before it closes the drawer: the first
+        // press undoes the smaller thing.
+        if (e.key === 'Escape' && view.filterInput.value) {
+          e.stopPropagation();
+          view.filterInput.value = '';
+          applyLogFilter('');
+        }
+      }
+    });
+    view.toggles = {
+      follow: toggle('Follow', 'Keep the newest line in view', () => {
+        view.follow = !view.follow;
+        syncLogView();
+        settleLogScroll();
+      }),
+      wrap: toggle('Wrap', 'Wrap long lines', () => {
+        logPrefs.wrap = !logPrefs.wrap;
+        syncLogView();
+        settleLogScroll();
+      }),
+      timestamps: toggle('Timestamps', 'Show when each line was written', () => {
+        logPrefs.timestamps = !logPrefs.timestamps;
+        syncLogView();
+        settleLogScroll();
+      }),
+      previous: toggle('Previous', '', () => {
+        view.previous = !view.previous;
+        startLogStream();
+      })
+    };
+    view.status = el('span', { class: 'logs-status' });
+    view.reconnect = el('button', {
+      class: 'logs-reconnect',
+      title: 'Read the log again',
+      onclick: () => startLogStream()
+    }, 'Reconnect');
+    view.lines = el('div', { class: 'logs-text' });
+    view.note = el('div', { class: 'logs-note' });
+    view.body = el('div', {
+      class: 'body logs-body',
+      onscroll: () => {
+        const body = view.body;
+        view.top = body.scrollTop;
+        view.left = body.scrollLeft;
+        // Scrolling up to read stops the follow; scrolling back down to the
+        // end picks it up again.
+        const atEnd = body.scrollHeight - body.scrollTop - body.clientHeight < 8;
+        if (atEnd !== view.follow) {
+          view.follow = atEnd;
+          syncLogView();
+        }
+      }
+    }, view.lines, view.note);
+    view.root = el('div', { class: 'logs-pane' },
+      el('div', { class: 'logs-toolbar' },
+        el('div', { class: 'logs-row' }, view.select, view.filterInput),
+        el('div', { class: 'logs-row' },
+          view.toggles.follow, view.toggles.wrap, view.toggles.timestamps, view.toggles.previous,
+          el('span', { class: 'spacer' }),
+          view.status,
+          view.reconnect
+        )
+      ),
+      view.body
+    );
+    return view;
+  }
+
+  /** (Re)starts the tab's stream with its current choices, from an empty pane. */
+  function startLogStream() {
+    const view = logView;
+    if (!view) return;
+    view.id = ++lastLogId;
+    view.running = true;
+    view.error = '';
+    view.lines.textContent = '';
+    view.count = 0;
+    view.shown = 0;
+    view.partial = '';
+    view.partialLine = null;
+    view.follow = true;
+    post({
+      type: 'streamLogs',
+      id: view.id,
+      kind: view.kind,
+      name: view.row.name,
+      namespace: view.row.namespace,
+      container: view.container || undefined,
+      previous: view.previous
+    });
+    syncLogView();
+  }
+
+  /** Stops the stream, if one is running, and forgets the tab. */
+  function stopLogStream() {
+    if (logView && logView.running) post({ type: 'stopLogs' });
+    logView = null;
+  }
+
+  /** The Logs tab's pane, brought up to date; it is the same element every time. */
+  function renderLogsPane(row) {
+    ensureLogView(row);
+    syncLogView();
+    return logView.root;
+  }
+
+  /** Whether the drawer on screen is showing the Logs tab of the current selection. */
+  function logsOnScreen(content) {
+    const backdrop = content.querySelector('.modal-backdrop');
+    return Boolean(backdrop) && state.detailTab === 'logs'
+      && backdrop.getAttribute('data-detail') === detailScrollKey()
+      && Boolean(logView) && logView.root.isConnected;
+  }
+
+  /**
+   * A refresh with the Logs tab open: the pane stays where it is, and only
+   * what a refresh can change is redrawn — the action bar, whose buttons
+   * follow the row, and the picker and Previous, which follow its containers.
+   */
+  function refreshLogsDrawer(content) {
+    const actions = content.querySelector('.modal > .actions');
+    if (actions) actions.replaceWith(renderModalActions(kindOf(state.active), state.selected));
+    syncLogView();
+  }
+
+  /** Brings the toolbar, status and note in line with the tab's state. */
+  function syncLogView() {
+    const view = logView;
+    if (!view) return;
+    view.root.className = 'logs-pane'
+      + (logPrefs.wrap ? ' wrap' : '')
+      + (logPrefs.timestamps ? ' show-ts' : '');
+
+    // Rebuilt only when the set changes — an ephemeral container added, say —
+    // since replacing the options of an open picker would close it.
+    const choices = logChoices(view.row);
+    const signature = choices.map((c) => `${c.kind}:${c.name}`).join('\n');
+    if (view.select.dataset.choices !== signature || !view.select.options.length) {
+      view.select.dataset.choices = signature;
+      // A row cached by an older build carried no containers, so kubectl was
+      // left to pick; it picks by the same rule, so the stream already running
+      // is this one's and needs no restart.
+      if (!view.container && choices.length) view.container = defaultLogContainer(view.row, choices);
+      view.select.replaceChildren(...(choices.length
+        ? choices.map((c) => el('option', { value: c.name }, c.kind === 'app' ? c.name : `${c.name} (${c.kind})`))
+        : [el('option', { value: '' }, 'Default container')]));
+    }
+    if (view.select.value !== view.container) view.select.value = view.container;
+
+    const press = (button, on) => button.setAttribute('aria-pressed', String(on));
+    press(view.toggles.follow, view.follow);
+    press(view.toggles.wrap, logPrefs.wrap);
+    press(view.toggles.timestamps, logPrefs.timestamps);
+    press(view.toggles.previous, view.previous);
+    // Previous is absent from the terminal buttons until a restart; here it
+    // stays put and is greyed instead, so the toolbar keeps its shape.
+    const previous = view.previous || canReadPrevious(view);
+    view.toggles.previous.disabled = !previous;
+    view.toggles.previous.title = previous
+      ? 'The log of the instance before the last restart'
+      : 'This container has not restarted, so there is no previous log';
+
+    const lines = (n) => `${n.toLocaleString()} line${n === 1 ? '' : 's'}`;
+    const counted = view.filter ? `${view.shown.toLocaleString()} of ${lines(view.count)}` : lines(view.count);
+    const [label, tone] = view.running
+      ? (view.previous ? ['Loading', ''] : ['Live', 'live'])
+      : view.error
+        ? ['Failed', 'error']
+        : [view.previous ? 'Previous instance' : 'Ended', ''];
+    view.status.className = 'logs-status' + (tone ? ` ${tone}` : '');
+    view.status.textContent = `${label} · ${counted}`;
+    view.reconnect.hidden = view.running;
+
+    // What the pane says when its lines do not speak for themselves.
+    const note = view.error
+      || (!view.count ? (view.running ? 'Waiting for output…' : 'No output.') : '')
+      || (view.filter && !view.shown ? 'No lines match the filter.' : '');
+    view.note.className = 'logs-note' + (view.error ? ' error' : '');
+    view.note.textContent = note;
+    view.note.hidden = !note;
+  }
+
+  /** Puts the scroller back where its reader left it — at the end, while following. */
+  function settleLogScroll() {
+    const view = logView;
+    if (!view || !view.body.isConnected) return;
+    view.body.scrollTop = view.follow ? view.body.scrollHeight : view.top;
+    view.body.scrollLeft = view.left;
+  }
+
+  /** Adds a chunk of the stream, which can start or end mid-line. */
+  function appendLogText(text) {
+    const view = logView;
+    // A line the last chunk left unfinished is redrawn with the rest of it.
+    if (view.partialLine) {
+      dropLogLine(view, view.partialLine);
+      view.partialLine = null;
+    }
+    const parts = (view.partial + text).split('\n');
+    view.partial = parts.pop();
+    // A burst longer than the cap would only be built to be dropped.
+    if (parts.length > MAX_LOG_LINES) parts.splice(0, parts.length - MAX_LOG_LINES);
+    const fragment = document.createDocumentFragment();
+    for (const part of parts) fragment.appendChild(addLogLine(view, part));
+    if (view.partial) {
+      view.partialLine = addLogLine(view, view.partial);
+      fragment.appendChild(view.partialLine);
+    }
+    view.lines.appendChild(fragment);
+    while (view.count > MAX_LOG_LINES) dropLogLine(view, view.lines.firstChild);
+    syncLogView();
+    if (view.follow) settleLogScroll();
+  }
+
+  function finishLogStream(error) {
+    const view = logView;
+    view.running = false;
+    view.error = error || '';
+    syncLogView();
+  }
+
+  function addLogLine(view, raw) {
+    const node = logLine(raw);
+    node.hidden = !logLineMatches(view, node);
+    view.count++;
+    if (!node.hidden) view.shown++;
+    return node;
+  }
+
+  function dropLogLine(view, node) {
+    node.remove();
+    view.count--;
+    if (!node.hidden) view.shown--;
+  }
+
+  function logLineMatches(view, node) {
+    return !view.filter || logLineText.get(node).includes(view.filter);
+  }
+
+  /** Narrows the lines on screen to those containing `value`, ignoring case. */
+  function applyLogFilter(value) {
+    const view = logView;
+    if (!view) return;
+    view.filter = value.toLowerCase();
+    view.shown = 0;
+    for (const node of view.lines.children) {
+      node.hidden = !logLineMatches(view, node);
+      if (!node.hidden) view.shown++;
+    }
+    syncLogView();
+    settleLogScroll();
+  }
+
+  /**
+   * One line of log: its timestamp split off into a span the Timestamps
+   * toggle shows or hides, and its colour codes drawn rather than printed.
+   */
+  function logLine(raw) {
+    const text = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+    const stamp = LOG_TIMESTAMP.exec(text);
+    const segments = ansiSegments(stamp ? text.slice(stamp[0].length) : text);
+    const node = el('div', { class: 'log-line' },
+      // Cut to the millisecond: nine digits of fraction are noise to a reader,
+      // and the full value is in the tooltip.
+      stamp ? el('span', {
+        class: 'log-ts',
+        title: stamp[0].trim(),
+        text: `${stamp[1]}${(stamp[2] || '').slice(0, 4)}${stamp[3]} `
+      }) : null,
+      ...segments.map(ansiNode)
+    );
+    logLineText.set(node, segments.map((segment) => segment.text).join('').toLowerCase());
+    return node;
+  }
+
+  /**
+   * The 16 ANSI colours as VS Code's own terminal paints them, so a log reads
+   * here as it does in the terminal its Logs button opens.
+   */
+  const ANSI_NAMES = ['Black', 'Red', 'Green', 'Yellow', 'Blue', 'Magenta', 'Cyan', 'White'];
+  const ANSI_PALETTE = [...ANSI_NAMES, ...ANSI_NAMES.map((name) => `Bright${name}`)]
+    .map((name) => `var(--vscode-terminal-ansi${name})`);
+
+  /**
+   * Escape sequences in a log: SGR (colour and weight), which is drawn, and
+   * any other CSI or OSC sequence, which a log has no use for and is dropped.
+   */
+  const ANSI_SEQUENCE = /\x1b\[([0-9;]*)([A-Za-z])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+
+  /** Splits text into runs of one style each. Most lines have no escapes at all. */
+  function ansiSegments(text) {
+    if (!text.includes('\x1b')) return [{ text, style: null }];
+    const segments = [];
+    let style = null;
+    let at = 0;
+    for (const match of text.matchAll(ANSI_SEQUENCE)) {
+      if (match.index > at) segments.push({ text: text.slice(at, match.index), style });
+      at = match.index + match[0].length;
+      if (match[2] === 'm') style = applySgr(style, match[1]);
+    }
+    if (at < text.length) segments.push({ text: text.slice(at), style });
+    return segments;
+  }
+
+  /** The style after one SGR sequence; null when it is back to plain. */
+  function applySgr(style, params) {
+    const next = { ...style };
+    const codes = params.split(';').map(Number);
+    for (let i = 0; i < codes.length; i++) {
+      const code = codes[i];
+      if (!code) {
+        for (const key of Object.keys(next)) delete next[key];
+      } else if (code === 1) next.bold = true;
+      else if (code === 2) next.dim = true;
+      else if (code === 3) next.italic = true;
+      else if (code === 4) next.underline = true;
+      else if (code === 22) next.bold = next.dim = false;
+      else if (code === 23) next.italic = false;
+      else if (code === 24) next.underline = false;
+      else if (code >= 30 && code <= 37) next.fg = ANSI_PALETTE[code - 30];
+      else if (code >= 90 && code <= 97) next.fg = ANSI_PALETTE[code - 82];
+      else if (code === 39) delete next.fg;
+      else if (code >= 40 && code <= 47) next.bg = ANSI_PALETTE[code - 40];
+      else if (code >= 100 && code <= 107) next.bg = ANSI_PALETTE[code - 92];
+      else if (code === 49) delete next.bg;
+      else if (code === 38 || code === 48) {
+        // 256-colour (`5;n`) and true colour (`2;r;g;b`), which take the
+        // codes after them as arguments.
+        let color;
+        if (codes[i + 1] === 5) {
+          color = ansi256(codes[i + 2]);
+          i += 2;
+        } else if (codes[i + 1] === 2) {
+          color = `rgb(${codes[i + 2] || 0}, ${codes[i + 3] || 0}, ${codes[i + 4] || 0})`;
+          i += 4;
+        }
+        if (color) next[code === 38 ? 'fg' : 'bg'] = color;
+      }
+    }
+    return Object.values(next).some(Boolean) ? next : null;
+  }
+
+  /** A colour from the 256-colour table: the 16 named ones, a 6×6×6 cube, then greys. */
+  function ansi256(n) {
+    if (!Number.isInteger(n) || n < 0 || n > 255) return '';
+    if (n < 16) return ANSI_PALETTE[n];
+    if (n < 232) {
+      const level = (v) => (v ? v * 40 + 55 : 0);
+      const i = n - 16;
+      return `rgb(${level(Math.floor(i / 36))}, ${level(Math.floor(i / 6) % 6)}, ${level(i % 6)})`;
+    }
+    const grey = (n - 232) * 10 + 8;
+    return `rgb(${grey}, ${grey}, ${grey})`;
+  }
+
+  /**
+   * A run of text in its style. Styled through the CSSOM rather than a
+   * `style` attribute, which the webview's content security policy refuses.
+   */
+  function ansiNode({ text, style }) {
+    if (!style) return document.createTextNode(text);
+    const span = el('span', { text });
+    if (style.fg) span.style.color = style.fg;
+    if (style.bg) span.style.background = style.bg;
+    if (style.bold) span.style.fontWeight = '600';
+    if (style.dim) span.style.opacity = '0.7';
+    if (style.italic) span.style.fontStyle = 'italic';
+    if (style.underline) span.style.textDecoration = 'underline';
+    return span;
+  }
+
   // ---------- actions ----------
 
   /**
@@ -5980,6 +6505,14 @@
         }
         renderContentOnly();
         break;
+      case 'logText':
+        // Written straight into the Logs pane, which keeps itself current; a
+        // render per chunk would rebuild the drawer many times a second.
+        if (logView && message.id === logView.id) appendLogText(message.text);
+        break;
+      case 'logEnd':
+        if (logView && message.id === logView.id) finishLogStream(message.error);
+        break;
       case 'fatal':
         state.error = message.message;
         state.busy = false;
@@ -6008,9 +6541,12 @@
       || target.isContentEditable;
   }
 
-  /** Puts the cursor in the filter box and selects what's there, ready to retype. */
+  /**
+   * Puts the cursor in the filter box and selects what's there, ready to retype.
+   * With the Logs tab open that is the log's own filter, not the table's behind it.
+   */
   function focusSearch() {
-    const node = searchInput();
+    const node = logView && logView.filterInput.isConnected ? logView.filterInput : searchInput();
     if (!node) return false;
     node.focus();
     node.select();

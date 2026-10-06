@@ -112,6 +112,14 @@ hand to a coding agent with the whole thing in view.
   object, newest first. For a container that has restarted, **previous logs**
   reads the log of the instance that died — the one that explains the restart.
 
+  Pods, Deployments, StatefulSets, DaemonSets and ReplicaSets add a **Logs** tab
+  that follows a container's log right in the drawer, starting from its last
+  1,000 lines. Pick the container from the dropdown (it opens on the one
+  `kubectl` would pick), filter the lines, and toggle Follow, Wrap, Timestamps
+  and Previous; colour codes are drawn as in the terminal. A workload's log comes
+  from one of its pods, as `kubectl logs deployment/…` picks it. The **Logs**
+  buttons still open a terminal.
+
 - **CPU and memory** — Nodes and Pods show live usage with a sparkline of the
   last ten minutes, once a full ten minutes has been recorded. Beside each,
   **CPU %** and **MEM %** give the usage as a share of the pod's limits or the

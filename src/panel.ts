@@ -76,6 +76,15 @@ type Inbound =
   | { type: 'describe'; kind: string; name: string; namespace?: string }
   /** The events section of the details tab: what happened to this one object. */
   | { type: 'events'; kind: string; name: string; namespace?: string }
+  /**
+   * The drawer's Logs tab: follow one container's log, or read its previous
+   * instance's. `id` is the webview's, echoed on every chunk so output from a
+   * stream it has since replaced can be told apart and dropped. An empty
+   * container leaves kubectl to pick, as it does in the terminal.
+   */
+  | { type: 'streamLogs'; id: number; kind: string; name: string; namespace: string; container?: string; previous?: boolean }
+  /** The Logs tab was closed, or moved on to another object. */
+  | { type: 'stopLogs' }
   | {
       type: 'action';
       action: string;
@@ -224,6 +233,12 @@ export class DashboardPanel {
    * shown once and then stays quiet until it changes or the scope recovers.
    */
   private readonly reported = new Map<string, string>();
+  /**
+   * The Logs tab's `kubectl logs`, if one is running. One per panel: the tab
+   * belongs to the drawer, which shows one object at a time, so starting a
+   * stream stops the one before it.
+   */
+  private logStream: k.LogStream | undefined;
 
   /**
    * Reveals the context's most recently focused dashboard, or opens one if
@@ -430,6 +445,7 @@ export class DashboardPanel {
     // pure waste — a closed panel shouldn't keep a slow cluster busy.
     this.inFlight?.abort.abort();
     this.inFlight = undefined;
+    this.stopLogs();
     while (this.disposables.length) {
       this.disposables.pop()?.dispose();
     }
@@ -645,6 +661,12 @@ export class DashboardPanel {
       case 'events':
         await this.objectEvents(message);
         break;
+      case 'streamLogs':
+        this.streamLogs(message);
+        break;
+      case 'stopLogs':
+        this.stopLogs();
+        break;
       case 'action':
         await this.runAction(message);
         break;
@@ -691,6 +713,9 @@ export class DashboardPanel {
   }
 
   private async bootstrap(): Promise<void> {
+    // A reloaded webview has forgotten the stream it asked for, so nothing
+    // would ever stop it and its output would go nowhere.
+    this.stopLogs();
     this.post({
       type: 'init',
       kinds: KINDS,
@@ -1386,6 +1411,59 @@ export class DashboardPanel {
     } catch (err) {
       this.post({ ...reply, error: describeError(err) });
     }
+  }
+
+  /**
+   * Streams one container's log into the drawer's Logs tab. Timestamps are
+   * always asked for and the webview shows or hides them, so toggling them is
+   * instant rather than a refetch that loses the scrollback.
+   *
+   * Output is batched before it is posted: a busy container writes thousands
+   * of lines a second, and a message per chunk would flood the webview with
+   * renders it cannot keep up with.
+   */
+  private streamLogs(message: Extract<Inbound, { type: 'streamLogs' }>): void {
+    this.stopLogs();
+    const { id, kind, name, namespace, container, previous } = message;
+    const args = [
+      terminalTarget(kind, name), '-n', namespace,
+      ...(container ? ['-c', container] : []),
+      '--tail', String(LOG_TAIL), '--timestamps',
+      // A previous instance's log is complete the moment it is read, so it is
+      // fetched rather than followed, as in the terminal.
+      ...(previous ? ['-p'] : ['-f'])
+    ];
+    let pending = '';
+    let timer: NodeJS.Timeout | undefined;
+    const flush = () => {
+      timer = undefined;
+      if (!pending) return;
+      this.post({ type: 'logText', id, text: pending });
+      pending = '';
+    };
+    const stream = k.streamLogs(args, this.contextName, (text) => {
+      pending += text;
+      timer ??= setTimeout(flush, LOG_FLUSH_MS);
+    }, (error) => {
+      clearTimeout(timer);
+      flush();
+      if (this.logStream === handle) {
+        this.logStream = undefined;
+      }
+      this.post({ type: 'logEnd', id, error });
+    });
+    const handle: k.LogStream = {
+      stop: () => {
+        clearTimeout(timer);
+        stream.stop();
+      }
+    };
+    this.logStream = handle;
+  }
+
+  private stopLogs(): void {
+    this.logStream?.stop();
+    this.logStream = undefined;
   }
 
   private async runAction(message: Extract<Inbound, { type: 'action' }>): Promise<void> {
@@ -2189,6 +2267,16 @@ function time(timestamp?: string): number {
 
 /** The workload kinds `kubectl logs` and `kubectl exec` accept as `kind/name`. */
 const WORKLOAD_TERMINALS = new Set(['deployments', 'statefulsets', 'daemonsets', 'replicasets']);
+
+/**
+ * How much history the Logs tab starts with. More than the terminal's 100,
+ * since the tab is where a log is read back rather than watched, but bounded
+ * so a long-lived pod does not replay its whole life before going live.
+ */
+const LOG_TAIL = 1000;
+
+/** How long output gathers before it is posted to the Logs tab; see streamLogs. */
+const LOG_FLUSH_MS = 80;
 
 /**
  * What logs and shell point kubectl at: a pod by its name, or a workload as
