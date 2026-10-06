@@ -2162,6 +2162,8 @@
 
     // The header carries the sort arrow, and sorting comes through this path.
     updateTableHeader(table, columns, rows);
+    // A refresh or the filter can change what the columns hold.
+    fitTable();
     // Counts and the select-all state are read off the same rows, which are
     // handed over rather than recomputed — `renderActionBar` would otherwise
     // filter and sort the whole cluster again for a number this pass already
@@ -2934,11 +2936,16 @@
     return terms.every((term) => matchesTerm(row, term) !== term.negated);
   }
 
-  function visibleRows() {
+  /** The rows the scope, namespace, status and filter let through, unsorted. */
+  function matchingRows() {
     const terms = parseQuery(state.filter, kindOf(state.active));
-    const rows = state.rows.filter(
+    return state.rows.filter(
       (row) => inScope(row) && inNamespace(row) && inStatus(row) && matchesQuery(row, terms)
     );
+  }
+
+  function visibleRows() {
+    const rows = matchingRows();
     const { key, dir } = state.sort;
     return rows.sort((a, b) => {
       const an = sortValue(a, key);
@@ -3101,42 +3108,70 @@
   const SECONDARY_FLOOR_PX = 80;
 
   /**
-   * What each column of a table measured at, by key, kept per table node. It
-   * is taken once, when the table is built, and reused by every refit after —
-   * the pane resizing, the rail folding, a column dragged — none of which
-   * change what the cells hold.
+   * What each column of a table measured at, kept per table node as
+   * `{ widths, sample }`: the widths by key, and the text of the cells they
+   * were measured from. A refit for the pane resizing, the rail folding or a
+   * column being dragged reuses it as it stands. A repaint that changes the
+   * rows — a refresh, the filter, the namespace — measures again, but only
+   * when the cells that set the widths are no longer the same.
    */
   const naturalWidths = new WeakMap();
 
   /**
-   * How wide each column's content is, measured from the rows that stretch it
-   * the most rather than from the rows on screen.
-   *
-   * The rows on screen are the wrong sample. A table rebuilt while a filter is
-   * narrowing it would size itself to the few rows that matched, and keep
-   * those widths once the filter was cleared, since a refresh reconciles into
-   * the table rather than rebuilding it. So the candidates are the longest few
-   * values per column across every row the kind has, drawn into a hidden copy
-   * of the table that lays itself out to its content, whose header cells are
-   * then read off. Length in characters is only a proxy for width in a
-   * proportional font, which is why it keeps several candidates per column
-   * rather than one.
+   * A cell's text as `measureColumns` ranks it, its length standing in for
+   * the cell's width. A usage cell counts its sparkline as the eight or so
+   * characters it is as wide as, and its reading one character more once it
+   * turns bold, so either appearing measures the column again.
    */
-  function measureColumns(content, columns) {
+  function measureText(row, col) {
+    const value = String(cellValue(row, col.key) ?? '');
+    if (col.key === 'status') return statusPillText(row, value);
+    if (!col.metric || !row.usage) return value;
+    const spark = !col.share && state.tableSparklines && hasFullHistory(row.usage) ? '~'.repeat(8) : '';
+    const bold = metricReading(row.usage, col.metric).tone === 'bad' ? '~' : '';
+    return spark + value + bold;
+  }
+
+  /**
+   * How wide each column's content is, measured from the rows the filters let
+   * through, so a column is as narrow as what is in it: picking a namespace or
+   * typing a filter takes it in to the rows left, and clearing it lets it out
+   * again. Of those rows only the few with the longest text per column are
+   * drawn, into a hidden copy of the table that lays itself out to its content,
+   * whose header cells are then read off. Length in characters is only a proxy
+   * for width in a proportional font, which is why it keeps several candidates
+   * per column rather than one.
+   *
+   * Their text is the sample the widths are kept with. Given the measurement
+   * the table already has, it is handed back as it was when the sample is
+   * unchanged, which on a steady cluster is most refreshes and every sort and
+   * tick.
+   */
+  function measureColumns(content, columns, shown, previous) {
     const PER_COLUMN = 4;
+    // Longest first, and alphabetical among the same length, so the rows
+    // picked don't depend on the order they are sorted in: a sort would
+    // otherwise pick other rows of the same length and measure again.
+    const wider = (a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0);
     const picked = new Set();
+    const texts = [];
     for (const col of columns) {
       const top = [];
-      for (const row of state.rows) {
-        const value = String(cellValue(row, col.key) ?? '');
-        const length = col.key === 'status' ? statusPillText(row, value).length : value.length;
-        if (top.length === PER_COLUMN && length <= top[PER_COLUMN - 1].length) continue;
-        top.push({ length, row });
-        top.sort((a, b) => b.length - a.length);
+      for (const row of shown) {
+        const text = measureText(row, col);
+        if (top.length === PER_COLUMN && wider(text, top[PER_COLUMN - 1].text) >= 0) continue;
+        top.push({ text, row });
+        top.sort((a, b) => wider(a.text, b.text));
         if (top.length > PER_COLUMN) top.pop();
       }
-      for (const { row } of top) picked.add(row);
+      for (const { text, row } of top) {
+        picked.add(row);
+        texts.push(text);
+      }
+      texts.push('');
     }
+    const sample = texts.join('\0');
+    if (previous && previous.sample === sample) return previous;
     const rows = [...picked];
     // Every header gets a sort arrow, so whichever column is sorted later still
     // fits its label.
@@ -3155,7 +3190,7 @@
       widths[col.key] = Math.ceil(cells[i + 1].getBoundingClientRect().width);
     });
     probe.remove();
-    return widths;
+    return { widths, sample };
   }
 
   /**
@@ -3207,14 +3242,36 @@
   }
 
   /**
-   * Gives the table on screen its column widths. Called after every rebuild,
-   * and by the observer on the pane whenever its size changes. Measures the
-   * table the first time it sees it; after that it only redistributes.
-   *
-   * `override` holds a width mid-drag, so the columns around the one being
-   * dragged give way and take back space as it moves.
+   * Measures the table on screen again for the rows about to be reconciled
+   * into it. It runs before they are, while the table is still laid out as it
+   * was: measured after, a table of thousands of rows would be laid out once
+   * for the measurement and again for the widths it brought. A hidden pane has
+   * nothing laid out to measure in, so there the measurement is only marked as
+   * out of date, for `fitTable` to take again once the pane is shown.
    */
-  function fitTable(override) {
+  function remeasureTable(table, columns, rows) {
+    const known = naturalWidths.get(table);
+    // Never fitted, so `fitTable` measures it from scratch anyway.
+    if (!known) return;
+    const content = table.parentElement;
+    if (!content.clientWidth) {
+      naturalWidths.set(table, { widths: known.widths, sample: null });
+      return;
+    }
+    naturalWidths.set(table, measureColumns(content, columns, rows, known));
+  }
+
+  /**
+   * Gives the table on screen its column widths. Called after every rebuild
+   * and every reconcile, and by the observer on the pane whenever its size
+   * changes. Measures the table the first time it sees it, and again if a
+   * repaint left its measurement out of date; otherwise it only redistributes.
+   *
+   * A column being dragged holds the width it has been dragged to, so the
+   * columns around it give way and take back space as it moves, and a refresh
+   * landing mid-drag doesn't snap it back.
+   */
+  function fitTable() {
     const content = app.querySelector('.content');
     const table = content && content.querySelector(':scope > table.grid');
     if (!table) return;
@@ -3234,15 +3291,16 @@
     // it gets once it has them — a measured third of a second, on top of the
     // one it needs anyway. The pane's gutter is reserved in the stylesheet, so
     // its width is the same with the table hidden as with it scrolling.
-    const fresh = !naturalWidths.has(table);
+    const known = naturalWidths.get(table);
+    const fresh = !known;
     if (fresh) table.style.display = 'none';
     try {
       // A pane with no size — a hidden editor tab — has nothing to fit to. The
       // observer calls again when it is shown.
       if (!content.clientWidth) return;
-      let natural = naturalWidths.get(table);
-      if (!natural) {
-        natural = measureColumns(content, columns);
+      let natural = known;
+      if (!natural || natural.sample === null) {
+        natural = measureColumns(content, columns, matchingRows(), known);
         naturalWidths.set(table, natural);
       }
       // Read off the stylesheet rather than the cell, which is not laid out
@@ -3250,8 +3308,10 @@
       const check = parseFloat(getComputedStyle(table.querySelector('col.check')).width) || 0;
       // A pixel short of the pane, so rounding never tips it into a scrollbar.
       const available = content.clientWidth - check - 1;
-      const pinned = { ...columnLayout(kind.id).widths, ...override };
-      const widths = fitWidths(columns, natural, pinned, available);
+      const resize = columnResize;
+      const dragged = resize && resize.width !== null ? { [resize.key]: resize.width } : {};
+      const pinned = { ...columnLayout(kind.id).widths, ...dragged };
+      const widths = fitWidths(columns, natural.widths, pinned, available);
       const cols = table.querySelectorAll(':scope > colgroup > col[data-col]');
       cols.forEach((col, i) => {
         const px = `${widths[i]}px`;
@@ -3383,7 +3443,7 @@
     if (!resize.frame) {
       resize.frame = requestAnimationFrame(() => {
         resize.frame = 0;
-        if (columnResize === resize) fitTable({ [resize.key]: resize.width });
+        if (columnResize === resize) fitTable();
       });
     }
   }
@@ -4198,6 +4258,8 @@
     // from or to that state changes the shape rather than the contents.
     if (tbody.querySelector('.empty-row')) return false;
     if (rows.length === 0) return false;
+    // Ahead of the rows changing; see `remeasureTable`.
+    remeasureTable(table, columns, rows);
 
     // Walked by sibling rather than indexed through `children`: the collection
     // is a live view that has to be rechecked on every access, which at a few
