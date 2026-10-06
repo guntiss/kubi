@@ -99,9 +99,14 @@ hand to a coding agent with the whole thing in view.
   Restart, which confirms, describing how that kind rolls, and then replaces every
   pod through `kubectl rollout restart`; it warns when the update strategy is
   `OnDelete`, where nothing is replaced until the pods are deleted.
-  Port forward is offered on Pods, Services, Deployments and StatefulSets: pick a
-  port from the spec, edit the local port (0 for any free one), and it runs in a
-  terminal you close to stop it, with an Open in Browser button once it listens.
+  Port forward is offered on Pods, Services, Deployments and StatefulSets. Its
+  dialog lists the ports from the spec: tick one or several, give each a local
+  port or leave it empty for any free one, and add ports the spec doesn't
+  declare. It also sets the address to listen on (localhost unless changed;
+  0.0.0.0 lets other machines connect), how long to wait for a running pod, and
+  whether to open the browser once the forward listens. A local port already in
+  use is reported in the dialog. The forward runs in a terminal you close to
+  stop it.
   Nodes add Cordon or Uncordon, and Drain, which confirms and then runs in a
   terminal. CronJobs add Trigger now, which confirms and then creates a Job from
   the CronJob's template, offering to jump to that Job or to its pods, and

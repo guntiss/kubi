@@ -464,7 +464,7 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
   .load-bar::after { animation-duration: 3s; }
 }
 
-input.search, input.pick-filter, select {
+input.search, input.pick-filter, input.forward-input, select {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, var(--border));
@@ -475,7 +475,7 @@ input.search, input.pick-filter, select {
   outline: none;
 }
 input.search { width: 240px; }
-input.search:focus, input.pick-filter:focus, select:focus { border-color: var(--vscode-focusBorder); }
+input.search:focus, input.pick-filter:focus, input.forward-input:focus, select:focus { border-color: var(--vscode-focusBorder); }
 
 /* The query box takes whatever the pickers leave, down to a usable minimum. */
 .filters input.search { flex: 1; width: auto; min-width: 200px; }
@@ -1748,6 +1748,97 @@ select.logs-container { flex: 1; min-width: 0; }
   border-color: transparent;
 }
 .confirm button.danger.solid:hover { filter: brightness(1.1); }
+.confirm button:disabled { opacity: 0.5; cursor: default; }
+
+/* ---------- port forward ---------- */
+
+.confirm.forward { width: min(520px, 100%); }
+
+/*
+ * The ports, one line each: tick, port, what the spec calls it, arrow, local
+ * port, and a remove button on the ones typed in. Every column but the name
+ * is a fixed width, so the headings line up over lines that are each a grid
+ * of their own.
+ */
+.forward-box {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.forward-ports {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 0 4px;
+}
+.forward-port {
+  display: grid;
+  grid-template-columns: 16px 72px minmax(0, 1fr) 14px 72px 22px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  margin: 0;
+}
+label.forward-port { cursor: pointer; }
+label.forward-port:hover { background: var(--vscode-list-hoverBackground); }
+.forward-port input[type="checkbox"] { margin: 0; }
+.forward-heading {
+  padding-top: 6px;
+  padding-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.forward-port .remote:not(input) {
+  font-family: var(--vscode-editor-font-family);
+  font-variant-numeric: tabular-nums;
+}
+.forward-port .label {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.forward-port .arrow { color: var(--muted); text-align: center; }
+input.forward-input { padding: 3px 6px; min-width: 0; }
+input.forward-input.local,
+input.forward-input.remote,
+input.forward-input.short { width: 72px; font-variant-numeric: tabular-nums; }
+input.forward-input[aria-invalid] { border-color: var(--vscode-inputValidation-errorBorder, var(--bad)); }
+
+.confirm button.link {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+.confirm button.link:hover:not(:disabled) {
+  color: var(--vscode-foreground);
+  background: var(--vscode-list-hoverBackground);
+}
+.forward-add { align-self: flex-start; padding: 3px 8px; margin-top: -4px; }
+.forward-remove { padding: 0; width: 22px; height: 22px; line-height: 1; }
+
+.forward-options {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px 12px;
+}
+.forward-options > label { white-space: nowrap; }
+.forward-options input.forward-input:not(.short) { width: 100%; }
+.forward-options .hint { display: block; color: var(--muted); font-size: 0.85em; margin-top: 3px; }
+
+.forward-note { color: var(--muted); font-size: 0.9em; }
+.forward-ports > .forward-note { padding: 4px 10px; }
+.forward-note.error,
+.forward-error {
+  color: var(--vscode-errorForeground, var(--bad));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.forward-error { font-size: 0.9em; }
 
 /* ---------- states ---------- */
 

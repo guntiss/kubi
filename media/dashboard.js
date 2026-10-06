@@ -4455,7 +4455,7 @@
    * takes nothing away from copying.
    */
   app.addEventListener('mousedown', (e) => {
-    if (!state.dragToSelect || e.button !== 0 || deleteDialog) return;
+    if (!state.dragToSelect || e.button !== 0 || dialog) return;
     // A drag whose release never reached us (see `onMarqueeMove`) is over by
     // now, whatever it last heard: this press is the button going down again.
     endMarquee();
@@ -4781,48 +4781,37 @@
     }
   ];
 
-  /** The delete confirmation on screen, if any. */
-  let deleteDialog = null;
+  /** The modal dialog on screen, if any: a delete confirmation or a port forward. */
+  let dialog = null;
 
   /**
-   * Asks before a delete, in the webview rather than through the extension's
-   * native modal, because the native one can carry only buttons and this needs
-   * a Force checkbox. Force is off every time the dialog opens: it skips
-   * graceful termination, and a setting that remembered itself would carry
-   * that into the next delete unnoticed.
+   * Puts up a modal dialog: a heading over `children`, on a backdrop that
+   * closes it when clicked. It keeps the keyboard to itself — Escape closes
+   * it, Tab cycles through its own controls, and no key reaches the table
+   * behind; `onKeydown` sees each key first, to add its own.
    *
    * The dialog lives on the body, outside `#app`, so a refresh that rebuilds
    * the dashboard underneath it does not take it away mid-decision.
    */
-  function confirmDelete({ heading, labels, confirmLabel, onConfirm }) {
-    closeDeleteDialog();
-    // Enough names to recognise the set, then a count for the rest, so the
-    // dialog stays a readable size even for a hundred rows.
-    const sorted = [...labels].sort();
-    const shown = sorted.slice(0, 10);
-    const rest = sorted.length - shown.length;
-
-    const force = el('input', { type: 'checkbox', id: 'delete-force' });
-    const confirm = () => {
-      const forced = force.checked;
-      closeDeleteDialog();
-      onConfirm(forced);
-    };
-    const cancel = el('button', { onclick: closeDeleteDialog }, 'Cancel');
-
-    deleteDialog = el('div', {
+  function openDialog({ heading, role = 'dialog', className, onKeydown }, ...children) {
+    closeDialog();
+    dialog = el('div', {
       class: 'confirm-backdrop',
-      onmousedown: (e) => { if (e.target === e.currentTarget) closeDeleteDialog(); }
+      onmousedown: (e) => { if (e.target === e.currentTarget) closeDialog(); }
     },
       el('div', {
-        class: 'confirm', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': heading,
+        class: className ? `confirm ${className}` : 'confirm',
+        role, 'aria-modal': 'true', 'aria-label': heading,
         onkeydown: (e) => {
-          if (e.key === 'Escape') {
+          if (onKeydown) onKeydown(e);
+          if (e.defaultPrevented) {
+            // Taken by the dialog's own handler.
+          } else if (e.key === 'Escape') {
             e.preventDefault();
-            closeDeleteDialog();
+            closeDialog();
           } else if (e.key === 'Tab') {
             // Keeps focus inside the dialog, which is modal to the page.
-            const stops = [...deleteDialog.querySelectorAll('input, button')];
+            const stops = [...dialog.querySelectorAll('input, select, button')].filter((node) => !node.disabled);
             const at = stops.indexOf(document.activeElement);
             const next = (at + (e.shiftKey ? -1 : 1) + stops.length) % stops.length;
             e.preventDefault();
@@ -4833,37 +4822,348 @@
         }
       },
         el('h2', { text: heading }),
-        el('div', { class: 'context', text: `Context "${state.context}"` }),
-        el('ul', { class: 'targets' },
-          ...shown.map((label) => el('li', { text: label })),
-          rest > 0 ? el('li', { class: 'more', text: `…and ${rest} more` }) : null
-        ),
-        el('label', { class: 'force', for: 'delete-force' },
-          force,
-          el('span', {},
-            'Force',
-            el('span', {
-              class: 'hint',
-              text: 'Skip graceful termination (--force --grace-period=0)'
-            })
-          )
-        ),
-        el('div', { class: 'note', text: 'This cannot be undone.' }),
-        el('div', { class: 'buttons' },
-          cancel,
-          el('button', { class: 'danger solid', onclick: confirm }, confirmLabel)
-        )
+        ...children
       )
     );
-    document.body.appendChild(deleteDialog);
+    document.body.appendChild(dialog);
+  }
+
+  function closeDialog() {
+    if (!dialog) return;
+    dialog.remove();
+    dialog = null;
+    forwardDialog = null;
+  }
+
+  /**
+   * Asks before a delete, in the webview rather than through the extension's
+   * native modal, because the native one can carry only buttons and this needs
+   * a Force checkbox. Force is off every time the dialog opens: it skips
+   * graceful termination, and a setting that remembered itself would carry
+   * that into the next delete unnoticed.
+   */
+  function confirmDelete({ heading, labels, confirmLabel, onConfirm }) {
+    // Enough names to recognise the set, then a count for the rest, so the
+    // dialog stays a readable size even for a hundred rows.
+    const sorted = [...labels].sort();
+    const shown = sorted.slice(0, 10);
+    const rest = sorted.length - shown.length;
+
+    const force = el('input', { type: 'checkbox', id: 'delete-force' });
+    const confirm = () => {
+      const forced = force.checked;
+      closeDialog();
+      onConfirm(forced);
+    };
+    const cancel = el('button', { onclick: closeDialog }, 'Cancel');
+
+    openDialog({ heading, role: 'alertdialog' },
+      el('div', { class: 'context', text: `Context "${state.context}"` }),
+      el('ul', { class: 'targets' },
+        ...shown.map((label) => el('li', { text: label })),
+        rest > 0 ? el('li', { class: 'more', text: `…and ${rest} more` }) : null
+      ),
+      el('label', { class: 'force', for: 'delete-force' },
+        force,
+        el('span', {},
+          'Force',
+          el('span', {
+            class: 'hint',
+            text: 'Skip graceful termination (--force --grace-period=0)'
+          })
+        )
+      ),
+      el('div', { class: 'note', text: 'This cannot be undone.' }),
+      el('div', { class: 'buttons' },
+        cancel,
+        el('button', { class: 'danger solid', onclick: confirm }, confirmLabel)
+      )
+    );
     // Cancel takes focus, so a stray Enter backs out rather than deletes.
     cancel.focus();
   }
 
-  function closeDeleteDialog() {
-    if (!deleteDialog) return;
-    deleteDialog.remove();
-    deleteDialog = null;
+  /**
+   * The port forward on screen, if any: the id its requests carry, and what
+   * to do with the replies to them. A reply whose id is not this one was meant
+   * for a dialog since closed or reopened, and is dropped.
+   */
+  let forwardDialog = null;
+  let forwardSeq = 0;
+
+  /**
+   * Whether the last forward asked to open the browser. Remembered for as long
+   * as the dashboard is open, unlike the listen address, which is localhost
+   * every time the dialog opens: an address that remembered itself would carry
+   * a forward reachable from the whole network into the next one unnoticed,
+   * the way a remembered Force would a delete.
+   */
+  let forwardOpensBrowser = false;
+
+  /** A whole port number from `min` to 65535, or null. */
+  function parsePort(text, min) {
+    const trimmed = String(text).trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const port = Number(trimmed);
+    return port >= min && port <= 65535 ? port : null;
+  }
+
+  /**
+   * The port-forward dialog: which ports, on which local ports, and how.
+   *
+   * It opens at once and fills in its ports when the extension has read them
+   * off the spec, ticking the first. Each port can be forwarded to a local
+   * port of its own, or left blank for any free one, and ports the spec does
+   * not declare can be added by hand. The rest are kubectl's own options: the
+   * address to listen on, and how long to wait for a running pod. Forward
+   * stays open until the extension says the forward started, so a local port
+   * already in use is reported here, against the field to change, instead of
+   * in a terminal after everything typed has gone.
+   */
+  function portForwardDialog(kind, row) {
+    const id = ++forwardSeq;
+    const target = `${kind.singular.toLowerCase()}/${row.name}`;
+    /** One line per port: its tick, and the fields that say where it goes. */
+    const lines = [];
+
+    const list = el('div', { class: 'forward-ports' },
+      el('div', { class: 'forward-note', text: 'Reading ports…' })
+    );
+    const add = el('button', {
+      class: 'link forward-add',
+      disabled: true,
+      onclick: () => addLine(null).remote.focus()
+    }, '+ Add port');
+    const address = el('input', {
+      type: 'text', id: 'forward-address', class: 'forward-input',
+      value: 'localhost', list: 'forward-addresses', spellcheck: 'false', autocomplete: 'off'
+    });
+    const timeout = el('input', {
+      type: 'text', id: 'forward-timeout', class: 'forward-input short',
+      inputmode: 'numeric', placeholder: '60', autocomplete: 'off'
+    });
+    const open = el('input', { type: 'checkbox', id: 'forward-open', checked: forwardOpensBrowser });
+    const error = el('div', { class: 'forward-error', role: 'alert', hidden: true });
+    const cancel = el('button', { onclick: closeDialog }, 'Cancel');
+    const submit = el('button', { class: 'primary', disabled: true, onclick: () => start() }, 'Forward');
+
+    /**
+     * Adds a port's line: one the spec declares, or, for `port` null, one to
+     * type a port into. A typed port is ticked from the start, since adding it
+     * is asking for it, and can be taken away again; its local port follows
+     * what is typed until it is edited on its own.
+     */
+    function addLine(port) {
+      const check = el('input', { type: 'checkbox', checked: !port, 'aria-label': 'Forward this port' });
+      const local = el('input', {
+        type: 'text', class: 'forward-input local', inputmode: 'numeric', placeholder: 'any',
+        value: port ? String(port.port) : '', autocomplete: 'off', 'aria-label': 'Local port',
+        title: 'Local port; leave empty for any free port',
+        oninput: () => {
+          local.dataset.edited = 'true';
+          check.checked = true;
+        }
+      });
+      const line = { port, check, local, remote: null };
+      let node;
+      if (port) {
+        node = el('label', { class: 'forward-port' },
+          check,
+          el('span', { class: 'remote', text: String(port.port) }),
+          el('span', { class: 'label', text: port.label || '' }),
+          el('span', { class: 'arrow', text: '→' }),
+          local,
+          el('span')
+        );
+      } else {
+        line.remote = el('input', {
+          type: 'text', class: 'forward-input remote', inputmode: 'numeric', placeholder: 'port',
+          autocomplete: 'off', 'aria-label': 'Port to forward to',
+          oninput: () => {
+            check.checked = true;
+            if (!local.dataset.edited) local.value = line.remote.value.trim();
+          }
+        });
+        node = el('div', { class: 'forward-port' },
+          check,
+          line.remote,
+          el('span'),
+          el('span', { class: 'arrow', text: '→' }),
+          local,
+          el('button', {
+            class: 'link forward-remove', title: 'Remove this port', 'aria-label': 'Remove this port',
+            onclick: () => {
+              lines.splice(lines.indexOf(line), 1);
+              node.remove();
+              add.focus();
+            }
+          }, '×')
+        );
+      }
+      lines.push(line);
+      list.appendChild(node);
+      return line;
+    }
+
+    function showError(text, input) {
+      for (const node of dialog.querySelectorAll('[aria-invalid]')) node.removeAttribute('aria-invalid');
+      error.hidden = !text;
+      error.textContent = text || '';
+      if (input) {
+        input.setAttribute('aria-invalid', 'true');
+        input.focus();
+        input.select();
+      }
+    }
+
+    /**
+     * What the dialog asks for, checked as far as it can be here; anything
+     * wrong comes back as the message and the field to fix instead.
+     */
+    function collect() {
+      const ports = [];
+      for (const line of lines) {
+        if (!line.check.checked) continue;
+        const remote = line.port ? line.port.port : parsePort(line.remote.value, 1);
+        if (remote === null) {
+          return { error: 'Enter a port from 1 to 65535 to forward to.', input: line.remote };
+        }
+        const typed = line.local.value.trim();
+        const local = typed === '' ? 0 : parsePort(typed, 0);
+        if (local === null) {
+          return { error: `Enter a local port for ${remote} from 1 to 65535, or leave it empty for any free port.`, input: line.local };
+        }
+        if (local && ports.some((p) => p.local === local)) {
+          return { error: `Local port ${local} is given twice.`, input: line.local };
+        }
+        ports.push({ remote, local, name: line.port ? line.port.name : '' });
+      }
+      if (!ports.length) return { error: 'Tick a port to forward.' };
+      if (!address.value.trim()) {
+        return { error: 'Enter an address to listen on, such as localhost.', input: address };
+      }
+      let seconds;
+      if (timeout.value.trim()) {
+        seconds = parsePort(timeout.value, 1);
+        if (seconds === null) return { error: 'The pod timeout is a whole number of seconds.', input: timeout };
+      }
+      return { ports, address: address.value.trim(), timeout: seconds };
+    }
+
+    /** Fields and Forward are held while the extension tries the forward. */
+    function setBusy(busy) {
+      for (const node of dialog.querySelectorAll('input, button')) {
+        if (node !== cancel) node.disabled = busy;
+      }
+      submit.textContent = busy ? 'Starting…' : 'Forward';
+    }
+
+    function start() {
+      if (submit.disabled) return;
+      const asked = collect();
+      if (asked.error) {
+        showError(asked.error, asked.input);
+        return;
+      }
+      showError(null);
+      forwardOpensBrowser = open.checked;
+      setBusy(true);
+      post({
+        type: 'portForward', id, kind: kind.id, name: row.name, namespace: row.namespace,
+        ports: asked.ports, address: asked.address, timeout: asked.timeout, open: open.checked
+      });
+    }
+
+    openDialog({
+      heading: `Port forward ${target}`,
+      className: 'forward',
+      // Enter in a field forwards, as it would submit a form. On a button it
+      // is left to press that button, so Cancel still backs out.
+      onKeydown: (e) => {
+        if (e.key === 'Enter' && e.target instanceof HTMLInputElement) {
+          e.preventDefault();
+          start();
+        }
+      }
+    },
+      el('div', { class: 'context', text: `Context "${state.context}" · namespace ${row.namespace}` }),
+      el('div', { class: 'forward-box' },
+        // Laid out as a port's line, so the headings sit over their columns.
+        el('div', { class: 'forward-port forward-heading', 'aria-hidden': 'true' },
+          el('span'),
+          el('span', { text: 'Port' }),
+          el('span'),
+          el('span'),
+          el('span', { text: 'Local port' }),
+          el('span')
+        ),
+        list
+      ),
+      add,
+      el('div', { class: 'forward-options' },
+        el('label', { for: 'forward-address', text: 'Listen on' }),
+        el('div', {},
+          address,
+          el('datalist', { id: 'forward-addresses' },
+            ...['localhost', '127.0.0.1', '::1', '0.0.0.0', '::'].map((value) => el('option', { value }))
+          ),
+          el('span', {
+            class: 'hint',
+            text: 'localhost or IP addresses, comma separated. 0.0.0.0 lets other machines connect.'
+          })
+        ),
+        el('label', { for: 'forward-timeout', text: 'Pod timeout' }),
+        el('div', {},
+          timeout, ' seconds',
+          el('span', { class: 'hint', text: 'How long to wait for a running pod (--pod-running-timeout)' })
+        )
+      ),
+      el('label', { class: 'force', for: 'forward-open' },
+        open,
+        el('span', {},
+          'Open in browser',
+          el('span', { class: 'hint', text: 'Opens each forwarded port once it accepts connections' })
+        )
+      ),
+      error,
+      el('div', { class: 'forward-note', text: 'Runs in a terminal; close it to stop the forward.' }),
+      el('div', { class: 'buttons' }, cancel, submit)
+    );
+    cancel.focus();
+
+    forwardDialog = {
+      id,
+      /** The ports the spec declares, or why they could not be read. */
+      ports(message) {
+        list.replaceChildren();
+        if (message.error) {
+          list.appendChild(el('div', { class: 'forward-note error', text: `Could not read the ports: ${message.error}` }));
+        } else if (!message.ports.length) {
+          list.appendChild(el('div', { class: 'forward-note', text: `${target} declares no ports. Enter one to forward to.` }));
+        }
+        for (const port of message.ports || []) addLine(port);
+        if (lines.length) lines[0].check.checked = true;
+        else addLine(null);
+        add.disabled = false;
+        submit.disabled = false;
+        // Ready to go on Enter, unless the user has moved on while waiting.
+        if (document.activeElement === cancel) (lines[0].remote || submit).focus();
+      },
+      /** The forward started, or the reason it could not, and where. */
+      done(message) {
+        if (!message.error) {
+          closeDialog();
+          return;
+        }
+        setBusy(false);
+        const input = message.field === 'address' ? address
+          : message.field === 'timeout' ? timeout
+            : message.local ? lines.find((line) => line.check.checked && parsePort(line.local.value || '0', 0) === message.local)?.local
+              : null;
+        showError(message.error, input);
+      }
+    };
+    post({ type: 'forwardPorts', id, kind: kind.id, name: row.name, namespace: row.namespace });
   }
 
   /**
@@ -5018,7 +5318,7 @@
     if (kind.forwardable) {
       actions.push({
         label: 'Port forward…',
-        run: () => post({ type: 'portForward', kind: kind.id, name: row.name, namespace: row.namespace }),
+        run: () => portForwardDialog(kind, row),
         title: 'kubectl port-forward, in a terminal'
       });
     }
@@ -6866,6 +7166,12 @@
         renderContentOnly();
         break;
       }
+      case 'forwardPorts':
+        if (forwardDialog && forwardDialog.id === message.id) forwardDialog.ports(message);
+        break;
+      case 'portForward':
+        if (forwardDialog && forwardDialog.id === message.id) forwardDialog.done(message);
+        break;
       case 'dragToSelect':
         state.dragToSelect = Boolean(message.enabled);
         // Turned off mid-drag: drop the box, keeping whatever it had ticked.
@@ -7136,7 +7442,7 @@
    * keydown on this window and forwards every key to the workbench, whose own
    * Select All then runs `execCommand('selectAll')` back in this document. That
    * listener sits on the window in the bubble phase, so the key is stopped here
-   * on the way down, before it gets there — and before the delete dialog, which
+   * on the way down, before it gets there — and before an open dialog, which
    * keeps every key pressed in it from reaching the handler below.
    */
   document.addEventListener('keydown', (e) => {
@@ -7144,7 +7450,7 @@
     if ((e.key !== 'a' && e.key !== 'A') || editingText(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
-    if (!deleteDialog && !rowMenu && isTable() && !state.selected) checkAllShown(true);
+    if (!dialog && !rowMenu && isTable() && !state.selected) checkAllShown(true);
   }, true);
 
   /**
@@ -7159,13 +7465,13 @@
     if (e.key !== 'r' && e.key !== 'R') return;
     e.preventDefault();
     e.stopPropagation();
-    if (!deleteDialog && !e.repeat) reload();
+    if (!dialog && !e.repeat) reload();
   }, true);
 
   document.addEventListener('keydown', (e) => {
-    // The delete dialog handles its own keys; one that arrives here came from
+    // An open dialog handles its own keys; one that arrives here came from
     // outside it, and nothing behind a modal should react.
-    if (deleteDialog) return;
+    if (dialog) return;
 
     // An open context menu has the keyboard to itself. Escape and the left
     // arrow back out of a submenu one level at a time, as VS Code's do.
