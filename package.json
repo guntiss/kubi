@@ -2,7 +2,7 @@
   "name": "kubi",
   "displayName": "Kubi - Kubernetes GUI",
   "description": "Manage Kubernetes clusters at lightning speed.",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "publisher": "guntiss",
   "license": "MIT",
   "icon": "media/icon.png",

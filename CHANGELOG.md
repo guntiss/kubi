@@ -4,6 +4,27 @@ All notable changes to Kubi are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-10-06
+
+### Added
+
+- Add a Go to submenu to the row menu that opens a pod's node and owners, a Service's pods, and other related objects.
+- Add kubi.tableSparklines, off by default, to draw CPU and memory sparklines in the Nodes and Pods tables.
+- Add a Settings item to the dashboard sidebar that opens Kubi's settings.
+
+### Changed
+
+- Name a pod's Deployment and CronJob in Go to, read off its ReplicaSet's or Job's name rather than looked up.
+- Tint ticked table rows with the focus colour, keeping failing and pending rows' washes readable under it.
+- Hide the toolbar spinner along with the Refresh button.
+- Keep auto-refreshing a dashboard that is visible in another editor group while VS Code has focus.
+- Hide the toolbar Refresh button and refresh with Ctrl/Cmd+R, showing the load bar until it lands.
+
+### Removed
+
+- Remove the kubi.allowSecretReveal setting, leaving Reveal and Copy for Secret values always on.
+- Drop the experimental label from drag-to-select.
+
 ## [1.0.7] — 2026-10-06
 
 ### Added
