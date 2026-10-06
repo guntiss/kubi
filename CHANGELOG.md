@@ -4,6 +4,27 @@ All notable changes to Kubi are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-10-06
+
+### Added
+
+- Add a Port forward dialog that forwards several ports at once and sets the listen address, pod timeout and opening the browser, replacing the port and local-port prompts.
+
+### Changed
+
+- Offer to reload the window when a newer Kubi is installed, since VS Code keeps running the old version, open dashboards included, until it reloads.
+- Open the About page with Kubi's tile, its version and links to GitHub for contributing, reporting an issue and the changelog.
+- Play the rail mark's hover animation once per visit, instead of again every time a refresh rebuilds the rail under the pointer.
+- Keep the rail's mark blue on hover and charge it instead: the hexagon turns a third of a turn while the bolt strikes and the mark lights up.
+- Inset the rail's brand row from the top edge and Go to, so its hover background no longer runs into the frame.
+- Replace the rail's folding sections with one customisable list of kinds, shared by every context, and name kinds by their Kubernetes names.
+- Give the page header a minimum height, so Overview and About match the tables' band instead of shrinking to their title.
+- Fit table columns to the rows shown, measuring them again whenever a refresh, the filter or the namespace changes what they hold.
+
+### Removed
+
+- Remove the context name and server version from the rail.
+
 ## [1.1.0] — 2026-10-06
 
 ### Added
