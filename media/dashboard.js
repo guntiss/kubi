@@ -622,6 +622,7 @@
 
   function render() {
     syncPulse();
+    syncLoadBar();
     const content0 = app.querySelector('.content');
     const scroll = content0?.scrollTop ?? 0;
     // The table is wider than the pane whenever a kind has many columns, so the
@@ -1943,11 +1944,38 @@
   }
 
   /**
+   * Content older than this gets the load bar while a fetch is replacing it.
+   * Twice the default poll interval: a poll starts once the rows are 5s old,
+   * and one that lands within another 5s is routine — flagging it would flash
+   * the bar on every tick.
+   */
+  const STALE_AFTER_MS = 10 * 1000;
+
+  /**
+   * A thin indeterminate bar across the top of the page, for when what is on
+   * screen is out of date and newer data is on its way. The toolbar spinner
+   * only says a fetch is running, which on a poll is every few seconds; the bar
+   * says the content in front of you is old enough for that fetch to matter —
+   * a replay from cache on opening, or a cluster slow enough that a poll
+   * outlasts the threshold.
+   *
+   * It sits on the body rather than in #app, which every render empties, so it
+   * is toggled rather than rebuilt and its sweep doesn't restart on each paint.
+   */
+  const loadBar = document.body.insertBefore(el('div', { class: 'load-bar', 'aria-hidden': 'true' }), app);
+
+  function syncLoadBar() {
+    const old = state.generated > 0 && Date.now() - state.generated > STALE_AFTER_MS;
+    loadBar.classList.toggle('active', state.busy && old);
+  }
+
+  /**
    * Swaps the freshness label in place, so a refresh doesn't rebuild the view.
    * The refresh control tracks the same busy flag, so it is swapped in step
-   * rather than waiting for the next full render.
+   * rather than waiting for the next full render, and so does the load bar.
    */
   function renderFreshnessOnly() {
+    syncLoadBar();
     const node = app.querySelector('.toolbar .freshness');
     if (node) {
       node.replaceWith(renderFreshness());
@@ -5565,6 +5593,9 @@
     // at "updated 0s ago" until the next fetch.
     const freshness = app.querySelector('.toolbar .freshness');
     if (freshness && !state.busy) renderFreshnessOnly();
+    // A fetch can outlast the threshold: rows that were young when it started
+    // cross it while it is still running, and that is when the bar belongs on.
+    if (state.busy) syncLoadBar();
   }, 1000);
 
   render();

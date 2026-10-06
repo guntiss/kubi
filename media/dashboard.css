@@ -414,6 +414,54 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
   .spinner { animation-duration: 2s; }
 }
 
+/*
+ * The page-level load bar: content on screen is old and a fetch is replacing
+ * it; see `syncLoadBar`. Above the menus and modals, since the data behind all
+ * of them is what is out of date. It fades rather than blinks, because a fetch
+ * that lands just after the threshold would otherwise flash it for a frame.
+ */
+.load-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 50;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+.load-bar.active { opacity: 1; }
+
+/*
+ * A segment a third of the bar's width, swept from just off the left edge to
+ * just off the right. Its translate is a percentage of its own width, so
+ * clearing the bar takes three of them. Paused while hidden, so the fade-out
+ * shows it where it stopped rather than jumping back to the start.
+ */
+.load-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 33.4%;
+  background: var(--vscode-progressBar-background, var(--vscode-focusBorder, #0e70c0));
+  animation: load-sweep 1.4s ease-in-out infinite;
+  animation-play-state: paused;
+}
+.load-bar.active::after { animation-play-state: running; }
+
+@keyframes load-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .load-bar::after { animation-duration: 3s; }
+}
+
 input.search, input.pick-filter, select {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
