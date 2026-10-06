@@ -327,10 +327,9 @@ export class DashboardPanel {
    * back on its own, but nothing else does: the options it was created with,
    * the extension's `open` map, and the context it was showing are all gone.
    *
-   * `contextInfo` is re-resolved rather than left undefined because the header
-   * and the About panel read the cluster, user and namespace off it — a revived
-   * panel without it would show a dashboard that cannot say what it is pointed
-   * at.
+   * `contextInfo` is re-resolved rather than left undefined because the About
+   * panel reads the cluster, user and namespace off it — a revived panel
+   * without it would show a dashboard that cannot say what it is pointed at.
    */
   static async revive(panel: vscode.WebviewPanel, context: vscode.ExtensionContext, state: unknown): Promise<void> {
     const contextName =
@@ -793,7 +792,6 @@ export class DashboardPanel {
       kinds: KINDS,
       groups: GROUPS,
       context: this.contextName,
-      cluster: this.contextInfo?.cluster ?? '',
       allNamespaces: k.ALL_NAMESPACES,
       // The page this panel was last showing, so a reload repaints the rail on
       // it before the load below starts filling it in.
@@ -823,12 +821,6 @@ export class DashboardPanel {
       if (cachedNamespaces) {
         this.post({ type: 'namespaces', namespaces: cachedNamespaces.payload });
       }
-      // Same replay-then-refresh treatment for the rail's version label.
-      const versionKey = DashboardCache.key(this.contextName, 'version', undefined);
-      const cachedVersion = this.cache.get(versionKey);
-      if (cachedVersion) {
-        this.post({ type: 'version', version: cachedVersion.payload });
-      }
       await this.load(this.activeKind);
       // Namespaces populate the picker but aren't needed to render; fetch after.
       try {
@@ -837,11 +829,6 @@ export class DashboardPanel {
         this.post({ type: 'namespaces', namespaces });
       } catch {
         // Listing namespaces can be forbidden by RBAC; the picker just stays short.
-      }
-      const version = await k.serverVersion(this.contextName);
-      if (version) {
-        this.cache.set(versionKey, version);
-        this.post({ type: 'version', version });
       }
     } catch (err) {
       const message = describeError(err);
@@ -1418,12 +1405,6 @@ export class DashboardPanel {
       this.notifyError('about', versions.serverError);
     } else {
       this.clearError('about');
-    }
-    // The rail's version label is read from the same call, so refresh it here
-    // rather than making the user open Overview to update it.
-    if (versions.server?.gitVersion) {
-      this.cache.set(DashboardCache.key(this.contextName, 'version', undefined), versions.server.gitVersion);
-      this.post({ type: 'version', version: versions.server.gitVersion });
     }
     // Again, now that the writes above have landed, so the figure counts what
     // this load itself stored rather than the size it found on arrival.
@@ -2303,8 +2284,8 @@ export class DashboardPanel {
    * classes so the handover is a swap of identical geometry rather than a jump.
    *
    * Only what is known before any kubectl call goes in: the rail's chrome and
-   * the context name. Anything cluster-derived — the kind list, the title, row
-   * counts — would be a guess that the first render would correct in front of
+   * how long its list is. Anything cluster-derived — the title, row counts —
+   * would be a guess that the first render would correct in front of
    * the reader, which is the flicker this is meant to avoid. The content area
    * is left empty for the same reason: the panel restores whichever page it was
    * last on, so its shape is not known here.
@@ -2321,7 +2302,6 @@ export class DashboardPanel {
     return `<div class="rail">`
       + `<button class="brand">${BRAND_MARK}<span class="name">Kubi</span>`
       + `<span class="chevron">«</span></button>`
-      + `<div class="context-box"><div class="context-name">${escapeHtml(this.contextName)}</div></div>`
       // Inert until the script takes over; it is here for its geometry, so the
       // list under it does not shift down when the real one is drawn.
       + `<div class="rail-jump-row"><button class="rail-jump" type="button" tabindex="-1" aria-hidden="true">`
@@ -2771,17 +2751,6 @@ function sameOwners(a: string[], b: string[]): boolean {
 
 function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/**
- * For the one piece of text the boot shell interpolates. A context name comes
- * from a kubeconfig, which is a file the user may not have written themselves,
- * so it is not trusted into markup even though the CSP already bars inline
- * script — an unescaped `<` would break the shell's layout regardless.
- */
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 }
 
 function makeNonce(): string {

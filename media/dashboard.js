@@ -10,7 +10,7 @@
   const BRAND_HEX = 'M64 12 108 37.5v51L64 114 20 88.5v-51L64 12Z';
   const BRAND_BOLT = 'M71 33 45 71h16l-5 24 28-39H68l3-23Z';
 
-  /** @type {{kinds: any[], context: string, cluster: string, allNamespaces: string,
+  /** @type {{kinds: any[], context: string, allNamespaces: string,
    *  active: string, namespace: string, namespaces: string[], rows: any[],
    *  empty: boolean, stale: boolean, busy: boolean, reloading: boolean,
    *  error: string, refreshError: string, filter: string, status: string,
@@ -23,9 +23,6 @@
      */
     groups: [],
     context: '',
-    cluster: '',
-    /** Server gitVersion for the rail; arrives after the first paint. */
-    version: '',
     /** Rail narrowed to an icon strip. Persisted globally by the extension. */
     railCollapsed: false,
     /** The kinds the rail lists until the user arranges it, by id. @type {string[]} */
@@ -830,16 +827,9 @@
             el('span', { class: 'name', text: 'Kubi' }),
             el('span', { class: 'chevron', text: '«' })
           ),
-      el('div', { class: 'context-box' },
-        el('div', { class: 'context-name', title: state.cluster || state.context },
-          state.context
-        ),
-        state.version ? el('div', { class: 'context-version', text: state.version }) : null
-      ),
       renderKindJump(),
-      // Everything above stays put; only the kinds scroll, so the brand row,
-      // the context/version block and Go to remain in reach however long the
-      // list gets.
+      // Everything above stays put; only the kinds scroll, so the brand row
+      // and Go to remain in reach however long the list gets.
       el('div', { class: 'rail-scroll' },
         ...items,
         // About is not a resource, so it is pushed to the bottom and separated
@@ -7458,7 +7448,6 @@
         state.kinds = message.kinds;
         state.groups = message.groups || [];
         state.context = message.context;
-        state.cluster = message.cluster;
         // Handed back to the extension's panel serializer after a window
         // reload, which is the only record of which context this panel was
         // showing — VS Code recreates the frame but not the extension's map.
@@ -7548,11 +7537,6 @@
       case 'namespaces':
         state.namespaces = message.namespaces;
         render();
-        break;
-      case 'version':
-        state.version = message.version || '';
-        // Only the rail's context box grows; leave the table and scroll alone.
-        renderRailOnly();
         break;
       case 'busy':
         if (message.kind !== state.active) break;

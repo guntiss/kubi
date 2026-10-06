@@ -226,16 +226,6 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/**
- * The cluster's server version, for the rail. Best-effort: a cluster that
- * answers `get` but not `version` still gets a usable dashboard, so failures
- * return undefined rather than propagating.
- */
-export async function serverVersion(context: string): Promise<string | undefined> {
-  const { server } = await versions(context);
-  return server?.gitVersion || undefined;
-}
-
 export interface WhoAmI {
   username?: string;
   uid?: string;
