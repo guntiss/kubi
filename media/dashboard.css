@@ -1619,6 +1619,23 @@ select.logs-container { flex: 1; min-width: 0; }
 .logs-pane.show-ts .log-ts { display: inline; }
 
 /*
+ * The line under the pointer, from its first row to its last: a wrapped line
+ * or a laid-out JSON block runs over several rows, and this is what shows
+ * where one line ends and the next begins.
+ */
+.log-line:hover { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.16)); }
+
+/*
+ * The filter's matches, in the colours the editor's own find gives them: a
+ * fill, and in high-contrast themes, where the fill is clear, an underline in
+ * place of the border find draws there. A highlight cannot take a border.
+ */
+::highlight(log-match) {
+  background-color: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, 0.33));
+  text-decoration: underline var(--vscode-editor-findMatchHighlightBorder, transparent);
+}
+
+/*
  * A JSON line, laid out: the timestamp keeps its column and the indented block
  * sits beside it, so every line of the block starts at the same edge. Coloured
  * as VS Code colours values in the debugger's Variables view.

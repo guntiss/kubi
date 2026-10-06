@@ -119,7 +119,9 @@ hand to a coding agent with the whole thing in view.
   JSON and Previous; colour codes are drawn as in the terminal. Timestamps show
   the time of day in your computer's timezone; hover one for the full date and
   time. Lines that are JSON are shown indented and coloured, unless JSON is
-  toggled off. A workload's log comes
+  toggled off. The filter marks each match in the text, and the line under the
+  pointer is highlighted, so it is clear where a wrapped line or a JSON block
+  starts and ends. A workload's log comes
   from one of its pods, as `kubectl logs deployment/…` picks it. The **Logs**
   buttons still open a terminal.
 

@@ -5679,6 +5679,16 @@
   const logLineText = new WeakMap();
 
   /**
+   * The filter's matches in the Logs tab, painted by `::highlight(log-match)`.
+   * There is one drawer, so one highlight serves it. Absent where the
+   * browser has no CSS Custom Highlight API, and the filter then only narrows.
+   */
+  const logMatches = window.CSS && CSS.highlights && typeof Highlight === 'function' && typeof StaticRange === 'function'
+    ? new Highlight()
+    : null;
+  if (logMatches) CSS.highlights.set('log-match', logMatches);
+
+  /**
    * The message of each line that is JSON, as it arrived, so the JSON toggle
    * can redraw it either way. Other lines draw the same in both modes and are
    * not kept.
@@ -5751,7 +5761,9 @@
       shown: 0,
       /** Text after the last newline, drawn as a line of its own until the rest arrives. */
       partial: '',
-      partialLine: null
+      partialLine: null,
+      /** The ranges marking the filter's matches, by line, so they can be unmarked. */
+      marked: new Map()
     };
 
     const toggle = (label, title, onclick) =>
@@ -5863,6 +5875,7 @@
     view.shown = 0;
     view.partial = '';
     view.partialLine = null;
+    unmarkAllLogLines(view);
     view.follow = true;
     post({
       type: 'streamLogs',
@@ -5879,6 +5892,7 @@
   /** Stops the stream, if one is running, and forgets the tab. */
   function stopLogStream() {
     if (logView && logView.running) post({ type: 'stopLogs' });
+    if (logView) unmarkAllLogLines(logView);
     logView = null;
   }
 
@@ -6011,6 +6025,7 @@
     node.hidden = !logLineMatches(view, node);
     view.count++;
     if (!node.hidden) view.shown++;
+    markLogLine(view, node);
     return node;
   }
 
@@ -6018,6 +6033,7 @@
     node.remove();
     view.count--;
     if (!node.hidden) view.shown--;
+    unmarkLogLine(view, node);
   }
 
   function logLineMatches(view, node) {
@@ -6030,12 +6046,89 @@
     if (!view) return;
     view.filter = value.toLowerCase();
     view.shown = 0;
+    unmarkAllLogLines(view);
     for (const node of view.lines.children) {
       node.hidden = !logLineMatches(view, node);
       if (!node.hidden) view.shown++;
+      if (!node.hidden && view.filter) markLogLine(view, node);
     }
     syncLogView();
     settleLogScroll();
+  }
+
+  /**
+   * Marks each place the filter occurs in a line, ignoring case. A match can
+   * span several runs — a colour change, or a JSON key, its colon and its
+   * value — so it is found in the line's whole text, and its range then runs
+   * from the run it starts in to the run it ends in.
+   *
+   * Drawn with the CSS Custom Highlight API rather than `<mark>` elements:
+   * a highlight paints ranges of text without changing the DOM, so the runs
+   * are never split and nothing is laid out again. With every one of 10,000
+   * lines matching, elements took a second per keystroke; ranges, a few
+   * milliseconds.
+   *
+   * Only the text on screen is searched. A JSON line also matches the filter
+   * in the form it arrived in, and a match that exists only there leaves the
+   * line shown with nothing marked. The timestamp is never searched, as the
+   * filter never matches it.
+   */
+  function markLogLine(view, node) {
+    unmarkLogLine(view, node);
+    const filter = view.filter;
+    if (!filter || node.hidden || !logMatches) return;
+
+    const stamp = node.firstChild && node.firstChild.classList && node.firstChild.classList.contains('log-ts')
+      ? node.firstChild
+      : null;
+    const runs = [];
+    let text = '';
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let run = walker.nextNode(); run; run = walker.nextNode()) {
+      if (run.parentNode === stamp) continue;
+      runs.push({ run, start: text.length });
+      text += run.data;
+    }
+    const lower = text.toLowerCase();
+    // A few characters lowercase to more than one, which would put every
+    // offset after them out of step with the text; such a line goes unmarked.
+    if (lower.length !== text.length) return;
+
+    // Static ranges, which hold on to their text nodes: a live range follows
+    // the DOM and would collapse the moment the line moved — out of the
+    // fragment it is built in, or along with the pane when the drawer is
+    // rebuilt around it. The text itself never changes once drawn.
+    const ranges = [];
+    for (let at = lower.indexOf(filter); at !== -1; at = lower.indexOf(filter, at + filter.length)) {
+      const to = at + filter.length;
+      const bounds = {};
+      for (const { run, start } of runs) {
+        const end = start + run.data.length;
+        if (at >= start && at < end) Object.assign(bounds, { startContainer: run, startOffset: at - start });
+        if (to > start && to <= end) {
+          Object.assign(bounds, { endContainer: run, endOffset: to - start });
+          break;
+        }
+      }
+      const range = new StaticRange(bounds);
+      ranges.push(range);
+      logMatches.add(range);
+    }
+    if (ranges.length) view.marked.set(node, ranges);
+  }
+
+  /** Takes a line's marks out again. */
+  function unmarkLogLine(view, node) {
+    const ranges = view.marked.get(node);
+    if (!ranges) return;
+    for (const range of ranges) logMatches.delete(range);
+    view.marked.delete(node);
+  }
+
+  /** Takes every mark out, as a new filter or a new stream starts over. */
+  function unmarkAllLogLines(view) {
+    if (logMatches) logMatches.clear();
+    view.marked.clear();
   }
 
   /**
@@ -6074,7 +6167,10 @@
     if (!logView) return;
     for (const node of logView.lines.children) {
       const segments = logJsonLines.get(node);
-      if (segments) node.lastChild.replaceWith(logMessage(segments));
+      if (!segments) continue;
+      node.lastChild.replaceWith(logMessage(segments));
+      // The marks went with the old message; the new one is marked afresh.
+      markLogLine(logView, node);
     }
   }
 
