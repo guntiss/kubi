@@ -25,6 +25,12 @@
     version: '',
     /** Rail narrowed to an icon strip. Persisted globally by the extension. */
     railCollapsed: false,
+    /**
+     * Rail sections the user has folded or opened, by group id; a group absent
+     * here keeps its default. Persisted globally by the extension.
+     * @type {Record<string, boolean>}
+     */
+    railGroups: {},
     allNamespaces: '__all__',
     active: 'overview',
     namespace: '',
@@ -642,6 +648,7 @@
     restoreDetailScroll(detail);
     restoreSearchFocus(caret);
     syncNsMenu();
+    syncKindMenu();
   }
 
   /** The filter box, if it is on screen. */
@@ -738,30 +745,25 @@
     );
 
     // Kinds are grouped by what they do, in the order the extension sent the
-    // groups. A section with no kinds — everything filtered out by a future
-    // change, or a group nothing is assigned to — draws nothing rather than a
-    // heading over empty space.
+    // groups, each section under a heading that folds it. A section with no
+    // kinds — everything filtered out by a future change, or a group nothing
+    // is assigned to — draws nothing rather than a heading over empty space.
     const items = [navItem('overview', 'Overview', '◈')];
-    let first = true;
     for (const group of state.groups) {
       const members = state.kinds.filter((kind) => kind.group === group.id);
       if (!members.length) continue;
-      // Both a heading and a rule are emitted for each group; CSS shows the
-      // heading when the rail is expanded and the rule when it is collapsed.
-      // The rule above the first group is skipped — the context box already
-      // separates it from what is above.
-      if (!first) {
-        items.push(el('div', { class: 'rail-divider' }));
-      }
-      items.push(el('div', { class: 'rail-label', text: group.label }));
-      items.push(...members.map((kind) => navItem(kind.id, kind.label, glyph(kind.id))));
-      first = false;
+      const open = groupOpen(group);
+      // A folded section still lists the page on screen, so folding never
+      // hides where you are — nor does arriving somewhere by Go to or a
+      // drill-down leave the rail with nothing lit.
+      const shown = open ? members : members.filter((kind) => kind.id === state.active);
+      items.push(renderRailGroup(group, members.length, open, !open && shown.length > 0));
+      items.push(...shown.map((kind) => navItem(kind.id, kind.label, glyph(kind.id))));
     }
 
     return el('div', { class: 'rail' },
       // Expanded, the whole top bar is the collapse target — a big, easy hit
       // rather than a small chevron. Collapsed, only the dot is left to click,
-      // so it becomes the way back open.
       // so it becomes the way back open — as a full-width button rather than
       // one sized to the mark, which left most of the 48px strip dead.
       collapsed
@@ -789,8 +791,10 @@
         ),
         state.version ? el('div', { class: 'context-version', text: state.version }) : null
       ),
-      // Everything above stays put; only the kinds scroll, so the brand row and
-      // the context/version block remain visible however long the list gets.
+      renderKindJump(),
+      // Everything above stays put; only the kinds scroll, so the brand row,
+      // the context/version block and Go to remain in reach however long the
+      // list gets.
       el('div', { class: 'rail-scroll' },
         ...items,
         // About is not a resource, so it is pushed to the bottom and separated
@@ -799,6 +803,116 @@
         el('div', { class: 'rail-footer' }, navItem('about', 'About', 'ⓘ'))
       )
     );
+  }
+
+  /**
+   * A section heading, and the button that folds it. Folded, it carries the
+   * section's size, so a closed heading still says what is behind it.
+   *
+   * Collapsed to the icon strip there is no room for the name, so the heading
+   * becomes a rule with the caret at its middle — the divider the strip always
+   * had between sections, now the place to fold them as well — and the name
+   * and size fly out on hover like any glyph's label.
+   */
+  function renderRailGroup(group, size, open, holdsActive) {
+    const collapsed = state.railCollapsed;
+    return el('button', {
+      class: 'rail-group' + (open ? ' open' : '') + (holdsActive ? ' holds-active' : ''),
+      type: 'button',
+      'aria-expanded': open ? 'true' : 'false',
+      'aria-label': `${group.label}, ${size} ${size === 1 ? 'kind' : 'kinds'}`,
+      onclick: () => toggleGroup(group.id),
+      onmouseenter: collapsed ? placeFlyout : null,
+      onmouseleave: collapsed ? hideFlyout : null
+    },
+      el('span', { class: 'rail-caret', 'aria-hidden': 'true' }),
+      el('span', { class: 'rail-label', text: group.label }),
+      open ? null : el('span', { class: 'rail-count', text: String(size) }),
+      collapsed ? el('span', { class: 'flyout' }, `${group.label} · ${size}`) : null
+    );
+  }
+
+  /** Whether a section is unfolded: the user's last word on it, else its default. */
+  function groupOpen(group) {
+    return state.railGroups[group.id] ?? group.open !== false;
+  }
+
+  /**
+   * Folds or unfolds a section. Only the rail redraws, so the table and its
+   * scroll stay as they were, and the choice is sent off to outlive the panel.
+   */
+  function toggleGroup(id) {
+    const group = state.groups.find((g) => g.id === id);
+    if (!group) return;
+    state.railGroups = { ...state.railGroups, [id]: !groupOpen(group) };
+    post({ type: 'setRailGroups', open: state.railGroups });
+    renderRailOnly();
+  }
+
+  /**
+   * The rail's Go to box: a button dressed as a search field that opens the
+   * kind list, the way the namespace picker opens its own. Thirty-odd kinds
+   * are faster typed than hunted for, folded sections included, and a k9s
+   * hand reaches for `:` — which opens this from anywhere outside a field.
+   *
+   * Collapsed to the strip it is just the magnifier, and its list opens beside
+   * the strip instead of under it.
+   */
+  function renderKindJump() {
+    const collapsed = state.railCollapsed;
+    return el('div', { class: 'rail-jump-row' },
+      el('button', {
+        class: 'rail-jump' + (kindMenu ? ' open' : ''),
+        type: 'button',
+        title: collapsed ? null : 'Go to a kind by name or kubectl short name (:)',
+        'aria-label': 'Go to kind',
+        'aria-haspopup': 'listbox',
+        'aria-expanded': kindMenu ? 'true' : 'false',
+        onclick: () => (kindMenu ? closeKindMenu(true) : openKindMenu('')),
+        onkeydown: (e) => {
+          if (e.ctrlKey || e.metaKey || e.altKey) return;
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            openKindMenu('');
+          } else if (e.key.length === 1 && e.key !== ' ' && e.key !== ':') {
+            // Typed straight onto the button: replayed into the box, as the
+            // namespace picker does, so the first letter is not lost.
+            e.preventDefault();
+            openKindMenu(e.key);
+          }
+        },
+        onmouseenter: collapsed ? placeFlyout : null,
+        onmouseleave: collapsed ? hideFlyout : null
+      },
+        searchMark(),
+        el('span', { class: 'label-text', text: 'Go to…' }),
+        el('kbd', { class: 'rail-jump-key', text: ':' }),
+        collapsed ? el('span', { class: 'flyout' }, 'Go to…', el('kbd', { text: ':' })) : null
+      )
+    );
+  }
+
+  /** A magnifier, drawn the way the refresh mark is so it takes the theme's colour. */
+  function searchMark() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'glyph search-mark');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    const lens = document.createElementNS(ns, 'circle');
+    lens.setAttribute('cx', '6.8');
+    lens.setAttribute('cy', '6.8');
+    lens.setAttribute('r', '4.6');
+    const handle = document.createElementNS(ns, 'path');
+    handle.setAttribute('d', 'M10.3 10.3 14 14');
+    for (const node of [lens, handle]) {
+      node.setAttribute('fill', 'none');
+      node.setAttribute('stroke', 'currentColor');
+      node.setAttribute('stroke-width', '1.6');
+      node.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(node);
+    }
+    return svg;
   }
 
   /**
@@ -860,6 +974,7 @@
       node.replaceWith(next);
       const scroller = next.querySelector('.rail-scroll');
       if (scroller) scroller.scrollTop = scroll;
+      syncKindMenu();
     } else {
       render();
     }
@@ -1004,7 +1119,7 @@
     closeRowMenu();
     closeNsMenu(false);
     const input = el('input', {
-      class: 'ns-filter',
+      class: 'pick-filter',
       type: 'text',
       placeholder: 'Filter namespaces…',
       spellcheck: 'false',
@@ -1018,9 +1133,9 @@
       },
       onkeydown: nsMenuKey
     });
-    const list = el('div', { class: 'ns-options', role: 'listbox' });
+    const list = el('div', { class: 'pick-options', role: 'listbox' });
     const menu = el('div', {
-      class: 'ns-menu',
+      class: 'pick-menu',
       // Keeps the caret in the box while an option or the list is clicked.
       onmousedown: (e) => { if (e.target !== input) e.preventDefault(); }
     }, input, list);
@@ -1072,7 +1187,7 @@
     if (!nsMenu.shown.includes(nsMenu.active)) nsMenu.active = nsMenu.shown[0] ?? null;
     list.textContent = '';
     if (!matches.length) {
-      list.appendChild(el('div', { class: 'ns-empty', text: 'No matching namespace' }));
+      list.appendChild(el('div', { class: 'pick-empty', text: 'No matching namespace' }));
       return;
     }
     for (const { ns, at, length } of matches) {
@@ -1083,7 +1198,7 @@
         label.slice(at + length)
       ];
       list.appendChild(el('div', {
-        class: 'ns-option' + (ns === nsMenu.active ? ' active' : '') + (ns === current ? ' current' : ''),
+        class: 'pick-option' + (ns === nsMenu.active ? ' active' : '') + (ns === current ? ' current' : ''),
         role: 'option',
         'aria-selected': ns === current ? 'true' : 'false',
         'data-ns': ns,
@@ -1091,8 +1206,8 @@
         // pointer during arrow-key travel doesn't snatch the highlight back.
         onmousemove: () => { if (nsMenu.active !== ns) setNsActive(ns); },
         onclick: () => pickNamespace(ns)
-      }, el('span', { class: 'ns-name' }, ...name),
-      el('span', { class: 'ns-count', text: String(counts.get(ns) ?? 0) })));
+      }, el('span', { class: 'pick-name' }, ...name),
+      el('span', { class: 'pick-count', text: String(counts.get(ns) ?? 0) })));
     }
     activeNsOption()?.scrollIntoView({ block: 'nearest' });
   }
@@ -1178,6 +1293,257 @@
   });
   window.addEventListener('blur', () => closeNsMenu(false));
   window.addEventListener('resize', () => closeNsMenu(false));
+
+  // ---------- go to ----------
+
+  /** The Go to list, while it is open. */
+  let kindMenu = null;
+
+  function kindTrigger() {
+    return app.querySelector('.rail .rail-jump');
+  }
+
+  /**
+   * Every page the rail can open, in the rail's own order, folded sections
+   * included — reaching a kind without unfolding its section first is half of
+   * what Go to is for. `words` are matched whole or in part beside the label:
+   * the id, the singular, and kubectl's short names.
+   */
+  function jumpTargets() {
+    const page = (id, label, glyphText) => ({ id, label, glyph: glyphText, group: '', words: [], singular: '' });
+    const targets = [page('overview', 'Overview', '◈')];
+    for (const group of state.groups) {
+      for (const kind of state.kinds.filter((k) => k.group === group.id)) {
+        targets.push({
+          id: kind.id,
+          label: kind.label,
+          glyph: glyph(kind.id),
+          group: group.label,
+          words: [kind.id, kind.singular.toLowerCase(), ...(kind.aliases || [])],
+          singular: kind.singular
+        });
+      }
+    }
+    targets.push(page('about', 'About', 'ⓘ'));
+    return targets;
+  }
+
+  /**
+   * How well a page answers a query, best first; null for not at all.
+   *
+   *   0  a short name, the id or the singular, typed in full: `svc`, `pod`
+   *   1  the label starts with it: "dep" is Deployments
+   *   2  a later word of the label does: "bind" finds both bindings
+   *   3  its initials do: "crb" is Cluster role bindings, "vwc" the
+   *      ValidatingWebhookConfigurations
+   *   4  the label or a word holds it anywhere: "set" finds the *Sets
+   *   5  the section's name: "storage" lists what Storage holds
+   */
+  function jumpScore(target, q) {
+    const label = target.label.toLowerCase();
+    if (target.words.includes(q)) return 0;
+    if (label.startsWith(q)) return 1;
+    const words = label.split(/\s+/);
+    if (words.some((word) => word.startsWith(q))) return 2;
+    if (q.length > 1) {
+      const initials = [
+        words.map((word) => word[0]).join(''),
+        (target.singular.match(/[A-Z]/g) || []).join('').toLowerCase()
+      ];
+      if (initials.some((i) => i.startsWith(q))) return 3;
+    }
+    if (label.includes(q) || target.words.some((word) => word.includes(q))) return 4;
+    if (target.group.toLowerCase().startsWith(q)) return 5;
+    return null;
+  }
+
+  /** The pages a query leaves, best match first and rail order within a rank. */
+  function matchTargets(query) {
+    const q = query.trim().toLowerCase();
+    const matches = [];
+    for (const target of jumpTargets()) {
+      const score = q ? jumpScore(target, q) : 0;
+      if (score === null) continue;
+      matches.push({ target, score, at: q ? target.label.toLowerCase().indexOf(q) : -1, length: q.length });
+    }
+    // Array sort is stable, so equal scores keep the rail's order.
+    return matches.sort((a, b) => a.score - b.score);
+  }
+
+  /**
+   * Opens the list under the rail's Go to box, or beside the strip when the
+   * rail is collapsed. Like the namespace list it lives on the body, so a
+   * render replacing the rail under it leaves it and its caret alone.
+   */
+  function openKindMenu(query) {
+    // Where the keyboard was, to give it back on Escape: the table after a
+    // `:`, the box itself after a click.
+    const returnTo = document.activeElement;
+    closeRowMenu();
+    closeNsMenu(false);
+    closeKindMenu(false);
+    const input = el('input', {
+      class: 'pick-filter',
+      type: 'text',
+      placeholder: 'Go to kind…',
+      spellcheck: 'false',
+      autocomplete: 'off',
+      'aria-label': 'Go to kind',
+      value: query,
+      oninput: () => {
+        kindMenu.active = null;
+        fillKindMenu();
+      },
+      onkeydown: kindMenuKey
+    });
+    const list = el('div', { class: 'pick-options', role: 'listbox' });
+    const menu = el('div', {
+      class: 'pick-menu kind-menu',
+      onmousedown: (e) => { if (e.target !== input) e.preventDefault(); }
+    }, input, list);
+    document.body.appendChild(menu);
+    const fromRail = returnTo instanceof HTMLElement && Boolean(returnTo.closest('.rail'));
+    kindMenu = { menu, input, list, active: null, shown: [], returnTo, fromRail };
+    fillKindMenu();
+    placeKindMenu();
+    const trigger = kindTrigger();
+    trigger?.classList.add('open');
+    trigger?.setAttribute('aria-expanded', 'true');
+    input.focus();
+    input.setSelectionRange(query.length, query.length);
+  }
+
+  /**
+   * Closes the list, and if asked hands the keyboard back to wherever it was
+   * before — or to the box, when a render has since replaced that.
+   */
+  function closeKindMenu(refocus) {
+    if (!kindMenu) return;
+    const { returnTo, fromRail } = kindMenu;
+    kindMenu.menu.remove();
+    kindMenu = null;
+    const trigger = kindTrigger();
+    if (trigger) {
+      trigger.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+    }
+    if (!refocus) return;
+    if (returnTo instanceof HTMLElement && returnTo.isConnected && returnTo !== document.body) {
+      returnTo.focus();
+    } else if (fromRail) {
+      trigger?.focus();
+    }
+  }
+
+  /** Rebuilds the list from the query, keeping the highlighted entry if it survives. */
+  function fillKindMenu() {
+    const { input, list } = kindMenu;
+    const matches = matchTargets(input.value);
+    kindMenu.shown = matches.map((m) => m.target.id);
+    if (!kindMenu.shown.includes(kindMenu.active)) kindMenu.active = kindMenu.shown[0] ?? null;
+    list.textContent = '';
+    if (!matches.length) {
+      list.appendChild(el('div', { class: 'pick-empty', text: 'No matching kind' }));
+      return;
+    }
+    for (const { target, at, length } of matches) {
+      const { id, label } = target;
+      const name = at === -1 ? [label] : [
+        label.slice(0, at),
+        el('mark', {}, label.slice(at, at + length)),
+        label.slice(at + length)
+      ];
+      list.appendChild(el('div', {
+        class: 'pick-option' + (id === kindMenu.active ? ' active' : '') + (id === state.active ? ' current' : ''),
+        role: 'option',
+        'aria-selected': id === state.active ? 'true' : 'false',
+        'data-id': id,
+        onmousemove: () => { if (kindMenu.active !== id) setKindActive(id); },
+        onclick: () => pickKind(id)
+      },
+        el('span', { class: 'pick-glyph', text: target.glyph }),
+        el('span', { class: 'pick-name' }, ...name),
+        // Which section it lives in, so a kind found here can be found again
+        // in the rail.
+        el('span', { class: 'pick-hint', text: target.group })));
+    }
+    activeKindOption()?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function activeKindOption() {
+    return [...kindMenu.list.children].find((node) => node.dataset.id === kindMenu.active);
+  }
+
+  function setKindActive(id) {
+    kindMenu.active = id;
+    for (const node of kindMenu.list.children) {
+      node.classList.toggle('active', node.dataset.id === id);
+    }
+    activeKindOption()?.scrollIntoView({ block: 'nearest' });
+  }
+
+  /**
+   * Opens the page. The keyboard is left on the page rather than handed back
+   * to the box: what comes next is the table — its arrows, `/`, Enter.
+   */
+  function pickKind(id) {
+    closeKindMenu(false);
+    if (id !== state.active) select(id);
+  }
+
+  /** Keys in the Go to box; Escape and Tab stop here, as in the namespace list. */
+  function kindMenuKey(e) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const { shown } = kindMenu;
+      if (!shown.length) return;
+      const at = shown.indexOf(kindMenu.active);
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      setKindActive(shown[at === -1 ? 0 : (at + step + shown.length) % shown.length]);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (kindMenu.active !== null) pickKind(kindMenu.active);
+    } else if (e.key === 'Escape' || e.key === 'Tab') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeKindMenu(true);
+    }
+  }
+
+  function placeKindMenu() {
+    const trigger = kindTrigger();
+    if (!trigger) return closeKindMenu(false);
+    const box = trigger.getBoundingClientRect();
+    const { menu } = kindMenu;
+    // The strip is too narrow to drop a list under, so collapsed it opens to
+    // the side, level with the magnifier.
+    const beside = state.railCollapsed;
+    const top = beside ? box.top : box.bottom + 2;
+    menu.style.minWidth = `${Math.max(box.width, 240)}px`;
+    menu.style.maxHeight = `${Math.max(160, Math.min(420, window.innerHeight - top - 8))}px`;
+    menu.style.top = `${top}px`;
+    menu.style.left = beside
+      ? `${box.right + 6}px`
+      : `${Math.max(4, Math.min(box.left, window.innerWidth - menu.offsetWidth - 4))}px`;
+  }
+
+  /** Called after the rail is rebuilt, to re-aim the list at the new trigger. */
+  function syncKindMenu() {
+    if (kindMenu) placeKindMenu();
+  }
+
+  function inKindPicker(node) {
+    return kindMenu.menu.contains(node) || Boolean(kindTrigger()?.contains(node));
+  }
+
+  document.addEventListener('mousedown', (e) => {
+    if (kindMenu && !inKindPicker(e.target)) closeKindMenu(false);
+  }, true);
+  document.addEventListener('focusin', (e) => {
+    if (kindMenu && !inKindPicker(e.target)) closeKindMenu(false);
+  });
+  window.addEventListener('blur', () => closeKindMenu(false));
+  window.addEventListener('resize', () => closeKindMenu(false));
 
   /**
    * What the status picker counts over: everything the namespace leaves
@@ -4734,6 +5100,7 @@
         }
         state.railCollapsed = Boolean(message.railCollapsed);
         document.body.classList.toggle('rail-collapsed', state.railCollapsed);
+        state.railGroups = message.railGroups || {};
         state.dragToSelect = Boolean(message.dragToSelect);
         state.allowSecretReveal = message.allowSecretReveal !== false;
         render();
@@ -5087,6 +5454,14 @@
     // Bare '/' is the unmodified shortcut, so it only applies outside a field.
     if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !typingInField(e.target)) {
       if (focusSearch()) e.preventDefault();
+      return;
+    }
+
+    // ':' opens Go to, as it opens the resource prompt in k9s. Outside a field
+    // only, like '/', where it would otherwise just be typed.
+    if (e.key === ':' && !e.ctrlKey && !e.metaKey && !e.altKey && !typingInField(e.target)) {
+      e.preventDefault();
+      openKindMenu('');
       return;
     }
 

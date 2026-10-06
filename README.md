@@ -60,16 +60,22 @@ hand to a coding agent with the whole thing in view.
   so rather than claiming all is well.
 
 - **Resource tables** — sortable, filterable tables with columns matched to each
-  kind, and status pills colored by health. The rail groups them:
+  kind, and status pills colored by health. The rail groups them into sections
+  that fold away; only Cluster and Workloads start open, and the rail remembers
+  what you open or fold:
 
   | Group | Kinds |
   | --- | --- |
-  | Cluster | Nodes, Namespaces, Events |
-  | Workloads | Pods, Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs, Autoscalers, Disruption budgets |
-  | Network | Services, Ingresses, Ingress classes, Endpoints, Network policies |
-  | Config | ConfigMaps, Secrets, Service accounts, Resource quotas, Limit ranges, Priority classes, Validating webhooks, Mutating webhooks |
+  | Cluster | Nodes, Events, Namespaces |
+  | Workloads | Pods, Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs, Autoscalers |
+  | Network | Services, Ingresses, Endpoints, Network policies, Ingress classes |
+  | Config | ConfigMaps, Secrets |
   | Storage | Volume claims, Volumes, Storage classes |
-  | Access | Roles, Role bindings, Cluster roles, Cluster role bindings |
+  | Policy | Resource quotas, Limit ranges, Disruption budgets, Priority classes, Validating webhooks, Mutating webhooks |
+  | Access | Service accounts, Roles, Role bindings, Cluster roles, Cluster role bindings |
+
+  To skip the rail, press `:` (as in k9s) or click **Go to…** and type a kind's
+  name, its kubectl short name (`svc`, `cm`, `pvc`) or its initials (`crb`).
 
   Tick rows for the bulk actions with their checkboxes, or drag across the
   table to draw a selection box, as on the desktop: a plain drag replaces the

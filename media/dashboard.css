@@ -76,7 +76,8 @@ button { user-select: none; }
 /* The pinned header. `flex: none` keeps it at its natural height instead of
    being squeezed when the list below is long. */
 .rail > .brand,
-.rail > .context-box { flex: none; }
+.rail > .context-box,
+.rail > .rail-jump-row { flex: none; }
 
 /*
  * The scrolling part of the rail. It is itself a column flex so .rail-spacer
@@ -136,8 +137,7 @@ button.brand:hover .chevron { color: var(--vscode-foreground); }
 }
 button.brand:hover .mark { color: var(--vscode-foreground); }
 .context-box {
-  padding: 0 10px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 0 10px 8px;
 }
 
 .context-name {
@@ -161,19 +161,106 @@ button.brand:hover .mark { color: var(--vscode-foreground); }
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Go to: a button dressed as a search field, under the context it searches.
+ * The rule beneath it closes off the pinned header from the list that scrolls.
+ */
+.rail-jump-row {
+  padding: 0 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+button.rail-jump {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px 4px 8px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-placeholderForeground, var(--muted));
+  border: 1px solid var(--vscode-input-border, var(--border));
+  text-align: left;
+}
+button.rail-jump:hover { background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
+button.rail-jump:focus,
+button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; }
+.rail-jump .glyph { width: 13px; height: 13px; flex: none; }
+.rail-jump .label-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The shortcut, as a keycap. Also used inside the collapsed strip's flyout. */
+.rail-jump-key,
+.flyout kbd {
+  flex: none;
+  min-width: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.85em;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--muted);
+}
+
+/*
+ * A section heading. The whole row is the fold toggle, so it is a real button
+ * reset out of its chrome — keyboard-reachable and announcing its state, like
+ * the Overview's reason groups.
+ */
+.rail-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 10px 4px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rail-group:hover { background: transparent; color: var(--vscode-foreground); }
+.rail-group:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+/*
+ * Drawn rather than typed, as the namespace picker's arrow is: the small
+ * triangle characters shrink to a dot at heading size. Points right when
+ * folded and down when open.
+ */
+.rail-caret {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin: 0 3px 0 1px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+.rail-group.open .rail-caret { margin-top: -3px; transform: rotate(45deg); }
 .rail-label {
-  padding: 14px 10px 6px;
   font-size: 0.78em;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+/* What a folded section holds, so the heading still says what is behind it. */
+.rail-count {
+  margin-left: auto;
+  font-size: 0.78em;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+/* Folded over the page on screen: the heading is lit, and the item stays. */
+.rail-group.holds-active { color: var(--vscode-foreground); }
 
 .nav-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 4px 10px;
   cursor: pointer;
   border-left: 2px solid transparent;
 }
@@ -327,7 +414,7 @@ button.brand:hover .mark { color: var(--vscode-foreground); }
   .spinner { animation-duration: 2s; }
 }
 
-input.search, input.ns-filter, select {
+input.search, input.pick-filter, select {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, var(--border));
@@ -338,7 +425,7 @@ input.search, input.ns-filter, select {
   outline: none;
 }
 input.search { width: 240px; }
-input.search:focus, input.ns-filter:focus, select:focus { border-color: var(--vscode-focusBorder); }
+input.search:focus, input.pick-filter:focus, select:focus { border-color: var(--vscode-focusBorder); }
 
 /* The query box takes whatever the pickers leave, down to a usable minimum. */
 .filters input.search { flex: 1; width: auto; min-width: 200px; }
@@ -465,9 +552,10 @@ button.ns-picker::after {
 /*
  * The list it opens: fixed on the body like the row menu, so the table's
  * scroller can't clip it, and placed under the trigger by `placeNsMenu`, which
- * also caps its height to the room below.
+ * also caps its height to the room below. The rail's Go to list is the same
+ * menu, placed by `placeKindMenu`.
  */
-.ns-menu {
+.pick-menu {
   position: fixed;
   z-index: 40;
   display: flex;
@@ -481,13 +569,13 @@ button.ns-picker::after {
   color: var(--vscode-menu-foreground, var(--vscode-foreground));
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
 }
-.ns-menu input.ns-filter { flex: none; min-width: 0; }
-.ns-options {
+.pick-menu input.pick-filter { flex: none; min-width: 0; }
+.pick-options {
   min-height: 0;
   overflow-y: auto;
   user-select: none;
 }
-.ns-option {
+.pick-option {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -496,33 +584,39 @@ button.ns-picker::after {
   white-space: nowrap;
   cursor: pointer;
 }
-/* A tick on the namespace in force, in a slot every row keeps so the names
- * stay aligned. */
-.ns-option::before {
+/* A tick on the choice in force — the namespace, or the page on screen — in a
+ * slot every row keeps so the names stay aligned. */
+.pick-option::before {
   content: '';
   flex: none;
   width: 1em;
   margin-right: -6px;
 }
-.ns-option.current::before { content: '✓'; }
-.ns-option.active {
+.pick-option.current::before { content: '✓'; }
+.pick-option.active {
   background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
   color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
 }
-.ns-option .ns-name {
+.pick-option .pick-name {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.ns-option .ns-count { opacity: 0.7; font-variant-numeric: tabular-nums; }
+.pick-option .pick-count { opacity: 0.7; font-variant-numeric: tabular-nums; }
 /* The typed text within each name, as VS Code's quick pick marks it. */
-.ns-option mark {
+.pick-option mark {
   background: transparent;
   color: var(--vscode-list-highlightForeground, inherit);
   font-weight: 600;
 }
-.ns-option.active mark { color: var(--vscode-list-focusHighlightForeground, inherit); }
-.ns-empty { padding: 4px 8px; opacity: 0.7; }
+.pick-option.active mark { color: var(--vscode-list-focusHighlightForeground, inherit); }
+.pick-empty { padding: 4px 8px; opacity: 0.7; }
+
+/* Go to's entries: the rail's glyph, the name, and the section it is under. */
+.kind-menu .pick-option { gap: 8px; }
+.kind-menu .pick-option::before { margin-right: 0; }
+.pick-glyph { flex: none; width: 14px; text-align: center; opacity: 0.85; }
+.pick-hint { padding-left: 12px; font-size: 0.9em; opacity: 0.6; }
 
 /*
  * Only actionable while a filter is on, but it stays in the row disabled
@@ -1475,6 +1569,8 @@ body.rail-collapsed {
 body.rail-collapsed .label-text,
 body.rail-collapsed .context-box,
 body.rail-collapsed .rail-label,
+body.rail-collapsed .rail-count,
+body.rail-collapsed .rail-jump-key,
 /* The script's collapsed rail leaves the chevron out entirely; the boot shell
    emits one brand row for both widths, so it is hidden here instead. */
 body.rail-collapsed .brand .chevron,
@@ -1483,8 +1579,22 @@ body.rail-collapsed .brand .name {
 }
 body.rail-collapsed .nav-item {
   justify-content: center;
-  padding: 10px 0;
+  padding: 8px 0;
 }
+/* Go to shrinks to its magnifier, a glyph like the rest of the strip. */
+body.rail-collapsed .rail-jump-row { padding: 0 0 6px; }
+body.rail-collapsed button.rail-jump {
+  justify-content: center;
+  padding: 7px 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: inherit;
+}
+body.rail-collapsed button.rail-jump:hover,
+body.rail-collapsed button.rail-jump.open { background: var(--vscode-list-hoverBackground); }
+body.rail-collapsed .rail-jump .glyph { width: 15px; height: 15px; }
+body.rail-collapsed button.rail-jump:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 /*
  * The whole strip width is the expand target. It used to be a small button
  * wrapped around the mark, which left most of the 48px row dead to the click;
@@ -1503,20 +1613,24 @@ body.rail-collapsed .brand .mark { width: 20px; height: 20px; }
 body.rail-collapsed .rail-scroll { overflow-y: auto; }
 
 /*
- * A rule between groups, standing in for the section headings a collapsed rail
- * has no room to print. Both are always in the DOM and CSS picks one: expanded,
- * the heading names the section and the rule is hidden; collapsed, the heading
- * goes and the rule separates the glyphs. Inset so it reads as a separator
- * rather than a second border beside the rail's own edge. The rail omits the
- * rule above its first group.
+ * Section headings, in a strip with no room to print them: a rule between the
+ * sections with the fold caret at its middle. Inset so it reads as a separator
+ * rather than a second border beside the rail's own edge; the name flies out
+ * on hover like any glyph's label.
  */
-.rail-divider { display: none; }
-body.rail-collapsed .rail-divider {
-  display: block;
+body.rail-collapsed .rail-group {
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 8px;
+}
+body.rail-collapsed .rail-group::before,
+body.rail-collapsed .rail-group::after {
+  content: '';
+  flex: 1;
   height: 1px;
   background: var(--border);
-  margin: 8px 12px;
 }
+body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackground); }
 
 
 /* ---------- about ---------- */

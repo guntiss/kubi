@@ -165,16 +165,26 @@ export interface Owner {
  * Rail sections. A flat list of thirty kinds is a wall of names; grouping them
  * the way the API itself is organised lets someone find a kind by what it does
  * rather than by reading every entry. Order here is the order they appear.
+ *
+ * Every section folds, and `open` is how it starts before the user has chosen:
+ * only the two that most sessions live in. The rest stay a heading apiece
+ * until asked for, so the rail opens at about twenty rows rather than forty.
+ *
+ * Config is kept to ConfigMaps and Secrets — what nearly every visit to it is
+ * for — and the cluster-wide guard rails it used to hold (quotas, limits,
+ * disruption budgets, priorities, admission webhooks) have a section of their
+ * own, most of them from the `policy` and admission APIs.
  */
-export type KindGroup = 'cluster' | 'workloads' | 'network' | 'config' | 'storage' | 'access';
+export type KindGroup = 'cluster' | 'workloads' | 'network' | 'config' | 'storage' | 'policy' | 'access';
 
-export const GROUPS: { id: KindGroup; label: string }[] = [
-  { id: 'cluster', label: 'Cluster' },
-  { id: 'workloads', label: 'Workloads' },
-  { id: 'network', label: 'Network' },
-  { id: 'config', label: 'Config' },
-  { id: 'storage', label: 'Storage' },
-  { id: 'access', label: 'Access' }
+export const GROUPS: { id: KindGroup; label: string; open: boolean }[] = [
+  { id: 'cluster', label: 'Cluster', open: true },
+  { id: 'workloads', label: 'Workloads', open: true },
+  { id: 'network', label: 'Network', open: false },
+  { id: 'config', label: 'Config', open: false },
+  { id: 'storage', label: 'Storage', open: false },
+  { id: 'policy', label: 'Policy', open: false },
+  { id: 'access', label: 'Access', open: false }
 ];
 
 export interface ResourceKind {
@@ -184,6 +194,11 @@ export interface ResourceKind {
   namespaced: boolean;
   icon: string;
   group: KindGroup;
+  /**
+   * kubectl's short names, so the rail's Go to box answers to `svc` or `cm`
+   * the way a k9s `:` prompt does. Lower case.
+   */
+  aliases?: string[];
   columns: Column[];
   /** Column the table sorts by on first open; defaults to name ascending. */
   sort?: { key: string; dir: number };
@@ -241,6 +256,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: false,
     icon: 'server',
     group: 'cluster',
+    aliases: ['no'],
     columns: [
       { key: 'name', label: 'Name' },
       { key: 'status', label: 'Status' },
@@ -262,6 +278,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'box',
     group: 'workloads',
+    aliases: ['po'],
     columns: [
       { key: 'name', label: 'Name' },
       { key: 'namespace', label: 'Namespace' },
@@ -284,6 +301,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'plug',
     group: 'network',
+    aliases: ['svc'],
     columns: [
       { key: 'name', label: 'Name' },
       { key: 'namespace', label: 'Namespace' },
@@ -301,6 +319,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'globe',
     group: 'network',
+    aliases: ['ing'],
     columns: [
       { key: 'name', label: 'Name' },
       { key: 'namespace', label: 'Namespace' },
@@ -317,6 +336,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'bell',
     group: 'cluster',
+    aliases: ['ev'],
     /**
      * A log rather than an inventory, so the columns lead with what happened
      * and to what, and the event's own generated name — which nothing useful
@@ -341,6 +361,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: false,
     icon: 'folder',
     group: 'cluster',
+    aliases: ['ns'],
     columns: [NAME, { key: 'status', label: 'Status' }, AGE]
   },
   {
@@ -351,6 +372,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'rocket',
     group: 'workloads',
+    aliases: ['deploy'],
     scalable: true,
     restartable: true,
     columns: [
@@ -371,6 +393,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'database',
     group: 'workloads',
+    aliases: ['sts'],
     scalable: true,
     restartable: true,
     columns: [
@@ -389,6 +412,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'layers',
     group: 'workloads',
+    aliases: ['ds'],
     restartable: true,
     columns: [
       NAME,
@@ -407,6 +431,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'copy',
     group: 'workloads',
+    aliases: ['rs'],
     scalable: true,
     columns: [
       NAME,
@@ -441,6 +466,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'clock',
     group: 'workloads',
+    aliases: ['cj'],
     columns: [
       NAME,
       NAMESPACE,
@@ -458,6 +484,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'link',
     group: 'network',
+    aliases: ['ep'],
     columns: [
       NAME,
       NAMESPACE,
@@ -473,6 +500,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'shield',
     group: 'network',
+    aliases: ['netpol'],
     columns: [
       NAME,
       NAMESPACE,
@@ -488,6 +516,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'file',
     group: 'config',
+    aliases: ['cm'],
     columns: [
       NAME,
       NAMESPACE,
@@ -518,7 +547,8 @@ const DECLARED_KINDS: ResourceKind[] = [
     singular: 'ServiceAccount',
     namespaced: true,
     icon: 'account',
-    group: 'config',
+    group: 'access',
+    aliases: ['sa'],
     columns: [
       NAME,
       NAMESPACE,
@@ -532,7 +562,8 @@ const DECLARED_KINDS: ResourceKind[] = [
     singular: 'ResourceQuota',
     namespaced: true,
     icon: 'gauge',
-    group: 'config',
+    group: 'policy',
+    aliases: ['quota'],
     columns: [
       NAME,
       NAMESPACE,
@@ -547,7 +578,8 @@ const DECLARED_KINDS: ResourceKind[] = [
     singular: 'LimitRange',
     namespaced: true,
     icon: 'ruler',
-    group: 'config',
+    group: 'policy',
+    aliases: ['limits'],
     columns: [
       NAME,
       NAMESPACE,
@@ -562,6 +594,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'chart',
     group: 'workloads',
+    aliases: ['hpa'],
     columns: [
       NAME,
       NAMESPACE,
@@ -579,6 +612,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: true,
     icon: 'disk',
     group: 'storage',
+    aliases: ['pvc'],
     columns: [
       NAME,
       NAMESPACE,
@@ -597,6 +631,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: false,
     icon: 'disk',
     group: 'storage',
+    aliases: ['pv'],
     columns: [
       NAME,
       { key: 'status', label: 'Status' },
@@ -615,6 +650,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     namespaced: false,
     icon: 'stack',
     group: 'storage',
+    aliases: ['sc'],
     columns: [
       NAME,
       { key: 'provisioner', label: 'Provisioner' },
@@ -630,7 +666,8 @@ const DECLARED_KINDS: ResourceKind[] = [
     singular: 'PodDisruptionBudget',
     namespaced: true,
     icon: 'shield',
-    group: 'workloads',
+    group: 'policy',
+    aliases: ['pdb'],
     columns: [
       NAME,
       NAMESPACE,
@@ -648,7 +685,8 @@ const DECLARED_KINDS: ResourceKind[] = [
     singular: 'PriorityClass',
     namespaced: false,
     icon: 'stack',
-    group: 'config',
+    group: 'policy',
+    aliases: ['pc'],
     columns: [
       NAME,
       { key: 'value', label: 'Value', numeric: true },
@@ -680,7 +718,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     singular: 'ValidatingWebhookConfiguration',
     namespaced: false,
     icon: 'shield',
-    group: 'config',
+    group: 'policy',
     columns: WEBHOOK_COLUMNS
   },
   {
@@ -689,7 +727,7 @@ const DECLARED_KINDS: ResourceKind[] = [
     singular: 'MutatingWebhookConfiguration',
     namespaced: false,
     icon: 'shield',
-    group: 'config',
+    group: 'policy',
     columns: WEBHOOK_COLUMNS
   },
   {

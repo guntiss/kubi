@@ -10,6 +10,13 @@ import { GROUPS, KINDS, REFERENCES, Refs, Row, kindById, skew, toRow } from './m
 const RAIL_COLLAPSED_KEY = 'kubi.railCollapsed';
 
 /**
+ * Which rail sections the user has opened or folded, by group id. Only their
+ * own choices are stored; a group missing here starts as `GROUPS` says, so a
+ * section added later gets its default rather than whatever an old map implies.
+ */
+const RAIL_GROUPS_KEY = 'kubi.railGroups';
+
+/**
  * The extension's mark for the boot shell's brand row, kept identical to
  * `brandMark()` in dashboard.js so the handover to the script is a swap of the
  * same pixels rather than a visible change. Inline for the same reason the
@@ -30,6 +37,13 @@ const BRAND_MARK =
   + '<path d="M71 33 45 71h16l-5 24 28-39H68l3-23Z" fill="currentColor"/>'
   + '</svg>';
 
+/** The rail's Go to magnifier, as `searchMark()` in dashboard.js draws it. */
+const SEARCH_MARK =
+  '<svg class="glyph search-mark" viewBox="0 0 16 16" aria-hidden="true">'
+  + '<circle cx="6.8" cy="6.8" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'
+  + '<path d="M10.3 10.3 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'
+  + '</svg>';
+
 /** Messages sent from the webview to the extension. */
 type Inbound =
   | { type: 'ready' }
@@ -38,6 +52,7 @@ type Inbound =
   | { type: 'cancelLoad' }
   | { type: 'setNamespace'; namespace: string }
   | { type: 'setRailCollapsed'; collapsed: boolean }
+  | { type: 'setRailGroups'; open: Record<string, boolean> }
   | { type: 'describe'; kind: string; name: string; namespace?: string }
   /** The events section of the details tab: what happened to this one object. */
   | { type: 'events'; kind: string; name: string; namespace?: string }
@@ -582,6 +597,11 @@ export class DashboardPanel {
         // someone who wants the rail out of the way wants that everywhere.
         await this.extension.globalState.update(RAIL_COLLAPSED_KEY, message.collapsed);
         break;
+      case 'setRailGroups':
+        // Global for the same reason: which sections someone keeps open is
+        // about the work they do, not about the cluster they are looking at.
+        await this.extension.globalState.update(RAIL_GROUPS_KEY, message.open);
+        break;
       case 'describe':
         await this.describe(message);
         break;
@@ -645,6 +665,7 @@ export class DashboardPanel {
       // it before the load below starts filling it in.
       active: this.activeKind,
       railCollapsed: this.extension.globalState.get<boolean>(RAIL_COLLAPSED_KEY, false),
+      railGroups: this.extension.globalState.get<Record<string, boolean>>(RAIL_GROUPS_KEY, {}),
       dragToSelect: dragToSelect(),
       allowSecretReveal: allowSecretReveal()
     });
@@ -2061,6 +2082,10 @@ export class DashboardPanel {
       + `<button class="brand">${BRAND_MARK}<span class="name">Kubi</span>`
       + `<span class="chevron">«</span></button>`
       + `<div class="context-box"><div class="context-name">${escapeHtml(this.contextName)}</div></div>`
+      // Inert until the script takes over; it is here for its geometry, so the
+      // list under it does not shift down when the real one is drawn.
+      + `<div class="rail-jump-row"><button class="rail-jump" type="button" tabindex="-1" aria-hidden="true">`
+      + `${SEARCH_MARK}<span class="label-text">Go to…</span><kbd class="rail-jump-key">:</kbd></button></div>`
       + `<div class="rail-scroll">${navRows}</div>`
       + `</div>`
       + `<div class="main">`
