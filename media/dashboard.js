@@ -77,8 +77,8 @@
     preserveCache: false,
     /**
      * Whether a drag across a table draws a selection box (`kubi.dragToSelect`).
-     * On by default, though still experimental; the extension sends it with
-     * `init` and again whenever it changes.
+     * On by default; the extension sends it with `init` and again whenever it
+     * changes.
      */
     dragToSelect: true,
     /** Whether the drawer offers Reveal and Copy for Secret values (`kubi.allowSecretReveal`). */
@@ -4385,8 +4385,8 @@
    * Rubber-band selection, as on the Windows desktop: press on a row, or on
    * the blank pane below the table, and drag, and every row the rectangle
    * touches is ticked. A plain drag replaces the ticks, Shift adds to them,
-   * and Ctrl/Cmd flips the rows it covers. Experimental; the
-   * `kubi.dragToSelect` setting turns it off.
+   * and Ctrl/Cmd flips the rows it covers. The `kubi.dragToSelect` setting
+   * turns it off.
    *
    * Table text is unselectable by policy (see the stylesheet), so the gesture
    * takes nothing away from copying.

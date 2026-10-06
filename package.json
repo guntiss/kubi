@@ -153,10 +153,7 @@
         "kubi.dragToSelect": {
           "type": "boolean",
           "default": true,
-          "description": "Experimental: Enable row selection by dragging.",
-          "tags": [
-            "experimental"
-          ]
+          "description": "Enable row selection by dragging."
         }
       }
     }
