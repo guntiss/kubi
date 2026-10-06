@@ -163,15 +163,26 @@ default namespace and any `kubectl` plugins on your `PATH`.
 
 ### Pods of a workload
 
-Select a row and press **Pods** in the drawer, or **Shift**+**Enter** on the row:
-the pod table opens narrowed to that workload, with a chip naming the scope; `×`
-widens it again. It works from Deployments, StatefulSets, DaemonSets,
-ReplicaSets, Jobs and CronJobs.
+Select a row and press **Pods** in the drawer, pick **Go to › Pods** from its
+right-click menu, or press **Shift**+**Enter** on the row: the pod table opens
+narrowed to that workload, with a chip naming the scope; `×` widens it again. It
+works from Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs,
+Nodes and Services.
 
 Pods are matched by ownership rather than by label selector, so two Deployments
 sharing an `app=` label do not show each other's pods. A Deployment is matched
 through its ReplicaSets, so a rollout in progress shows the old and new pods
-together.
+together. A Service owns nothing, so its pods are the ones its selector matches.
+
+### Go to
+
+A row's right-click menu has a **Go to** submenu for the objects it is tied to:
+a pod's node, its controller (the Deployment and ReplicaSet, or the StatefulSet,
+DaemonSet, Job or CronJob) and the volume claims it mounts; a ReplicaSet's
+Deployment and a Job's CronJob; a Service's pods and Endpoints; an Ingress's
+Services; the object an event is about; an autoscaler's target; a volume claim's
+volume and back; a binding's role and service accounts. The object's table opens
+with its row selected and its drawer open, and **←** (or **Esc**) goes back.
 
 ### Filtering
 

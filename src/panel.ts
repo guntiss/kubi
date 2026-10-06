@@ -138,6 +138,15 @@ type Inbound =
    */
   | { type: 'showOwned'; kind: string; name: string; namespace?: string }
   /**
+   * Go to the controller one hop above an object's owner: a pod's Deployment,
+   * through the ReplicaSet its row names. Resolved here for the same reason as
+   * `showOwned` — the webview holds no ReplicaSet rows while it shows pods.
+   * `owner` is the API Kind wanted, and `kind`/`name` the hop in between.
+   */
+  | { type: 'goToOwner'; kind: string; name: string; namespace?: string; owner: string }
+  /** A Go to landed on a table without the object in it; said here, where toasts live. */
+  | { type: 'goToMissing'; kind: string; name: string; namespace?: string }
+  /**
    * The scope was dismissed in the view. Without this the panel would keep
    * re-resolving the owner set on every pod refresh and push it back, silently
    * re-narrowing a table the user had just widened.
@@ -718,6 +727,16 @@ export class DashboardPanel {
       case 'showOwned':
         await this.showOwned(message);
         break;
+      case 'goToOwner':
+        await this.goToOwner(message);
+        break;
+      case 'goToMissing': {
+        const label = message.namespace ? `${message.namespace}/${message.name}` : message.name;
+        vscode.window.showInformationMessage(
+          `Kubi: ${kindById(message.kind)?.singular ?? message.kind} ${label} not found`
+        );
+        break;
+      }
       case 'clearScope':
         this.scopeTarget = undefined;
         this.scopeOwners = [];
@@ -881,8 +900,36 @@ export class DashboardPanel {
     this.post({
       type: 'scope',
       kind: 'pods',
-      scope: { ...target, owners: resolved.owners }
+      scope: { ...target, owners: resolved.owners, selector: resolved.selector }
     });
+  }
+
+  /**
+   * Opens the controller that owns `target`, when it is a `target.owner`: the
+   * Deployment above a ReplicaSet, the CronJob above a Job. A pod's row names
+   * only the hop in between, so the webview hands that over and the rest of
+   * the chain is read here, one object, at the moment it is asked for.
+   */
+  private async goToOwner(
+    target: { kind: string; name: string; namespace?: string; owner: string }
+  ): Promise<void> {
+    const label = `${kindById(target.kind)?.singular ?? target.kind} ${target.name}`;
+    let object: k.KubeObject;
+    try {
+      object = await k.getObject(target.kind, target.name, this.contextName, target.namespace);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Kubi: could not read ${label}: ${describeError(err)}`);
+      return;
+    }
+    const ref = (object.metadata.ownerReferences ?? []).find((r) => r.kind === target.owner && r.name);
+    const kind = KINDS.find((entry) => entry.singular === target.owner);
+    // A bare ReplicaSet, or a Job someone created by hand, has no controller
+    // above it. Saying so beats landing on a table with nothing picked out.
+    if (!ref?.name || !kind) {
+      vscode.window.showInformationMessage(`Kubi: ${label} is not owned by a ${target.owner}`);
+      return;
+    }
+    this.post({ type: 'goTo', kind: kind.id, name: ref.name, namespace: target.namespace });
   }
 
   /**
@@ -890,10 +937,17 @@ export class DashboardPanel {
    * DaemonSet, Job or ReplicaSet that is the workload itself; a Deployment and
    * a CronJob own their pods one controller further down, so their
    * intermediates are listed and their names collected.
+   *
+   * A Service owns nothing: its pods are whatever its selector matches, and
+   * the names of those pods stand in for owners. They are listed with the
+   * selector rather than matched in the view, which holds no pod labels.
    */
   private async resolveOwners(
     target: { kind: string; name: string; namespace?: string }
-  ): Promise<{ owners: string[]; error?: string }> {
+  ): Promise<{ owners: string[]; selector?: string; error?: string }> {
+    if (target.kind === 'services') {
+      return this.resolveSelected(target);
+    }
     const hop = DashboardPanel.OWNER_HOP[target.kind];
     if (!hop) {
       return { owners: [target.name] };
@@ -912,6 +966,29 @@ export class DashboardPanel {
     } catch (err) {
       // An empty owner set would read as "this workload has no pods", which is
       // a different and more misleading claim than saying the lookup failed.
+      return { owners: [], error: describeError(err) };
+    }
+  }
+
+  /** The names of the pods a Service's selector matches, for its scope. */
+  private async resolveSelected(
+    target: { kind: string; name: string; namespace?: string }
+  ): Promise<{ owners: string[]; selector?: string; error?: string }> {
+    try {
+      // Read on every resolve rather than once: a selector edited while the
+      // scope is open should move the pods with it, as a rollout does.
+      const service = await k.getObject('services', target.name, this.contextName, target.namespace);
+      const selector = Object.entries<string>(service.spec?.selector ?? {})
+        .map(([key, value]) => `${key}=${value}`)
+        .join(',');
+      // No selector means no pods, not every pod — which is what `-l ''`
+      // would list. Its endpoints are managed by hand, if at all.
+      if (!selector) {
+        return { owners: [], error: 'it has no selector, so it selects no pods' };
+      }
+      const pods = await k.list('pods', this.contextName, target.namespace, undefined, selector);
+      return { owners: pods.map((pod) => pod.metadata.name), selector };
+    } catch (err) {
       return { owners: [], error: describeError(err) };
     }
   }
@@ -945,7 +1022,7 @@ export class DashboardPanel {
     this.post({
       type: 'scope',
       kind: 'pods',
-      scope: { ...target, owners: resolved.owners },
+      scope: { ...target, owners: resolved.owners, selector: resolved.selector },
       // Nothing about the view changes but the owner set, so the webview keeps
       // its filters, selection and scroll rather than re-entering the scope.
       update: true

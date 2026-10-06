@@ -167,6 +167,14 @@ export interface Row {
    * pod -> ReplicaSet -> Deployment.
    */
   owner?: Owner;
+  /**
+   * Other objects this one names, for the row menu's Go to: the claims a pod
+   * mounts, the workload an autoscaler drives, the object an event is about.
+   * A pod's node and any kind's owner are left out, since `cells.node` and
+   * `owner` already carry them and a pod table is the one where every byte
+   * per row counts. See `linksOf`.
+   */
+  links?: Link[];
   /** Nodes and pods, when metrics-server answered; see `Usage`. */
   usage?: Usage;
 }
@@ -175,6 +183,15 @@ export interface Row {
 export interface Owner {
   kind: string;
   name: string;
+}
+
+/** A reference to another object Kubi lists. */
+export interface Link {
+  /** A kind id from `KINDS`, not the API's Kind: 'persistentvolumes'. */
+  kind: string;
+  name: string;
+  /** Absent for a cluster-scoped kind. */
+  namespace?: string;
 }
 
 /**
@@ -872,6 +889,7 @@ export function toRow(kindId: string, object: k.KubeObject, refs: Refs = {}): Ro
     ...(built.terminating ? { terminating: built.terminating } : {}),
     ...(built.terminatingGrace ? { terminatingGrace: built.terminatingGrace } : {}),
     ...(owner ? { owner } : {}),
+    ...linksField(kindId, object),
     ...(object.metadata.uid ? { uid: object.metadata.uid } : {})
   };
 }
@@ -916,6 +934,90 @@ function ownerOf(object: k.KubeObject): Owner | undefined {
   const refs = object.metadata.ownerReferences ?? [];
   const ref = refs.find((r) => r.controller) ?? refs[0];
   return ref?.kind && ref.name ? { kind: ref.kind, name: ref.name } : undefined;
+}
+
+/** The kind id Kubi lists an API Kind under, if it lists it at all: 'StatefulSet' -> 'statefulsets'. */
+function kindIdOf(apiKind: string | undefined): string | undefined {
+  return apiKind ? KINDS.find((kind) => kind.singular === apiKind)?.id : undefined;
+}
+
+function linksField(kindId: string, object: k.KubeObject): Pick<Row, 'links'> {
+  const links = linksOf(kindId, object);
+  return links.length ? { links } : {};
+}
+
+/**
+ * The objects a row points at by name, for Go to. Only references the object
+ * itself spells out are followed; one that would take a search to answer —
+ * which Services select this pod, which autoscaler drives this Deployment —
+ * is not, since that would be a list per refresh for a menu item.
+ */
+function linksOf(kindId: string, object: k.KubeObject): Link[] {
+  const namespace = object.metadata.namespace;
+  const spec: any = object.spec ?? {};
+  switch (kindId) {
+    case 'pods':
+      return (spec.volumes ?? []).flatMap((volume: any): Link[] => {
+        if (volume.persistentVolumeClaim?.claimName) {
+          return [{ kind: 'persistentvolumeclaims', name: volume.persistentVolumeClaim.claimName, namespace }];
+        }
+        // A generic ephemeral volume's claim is created for the pod, and named
+        // after it and the volume by rule rather than recorded anywhere.
+        if (volume.ephemeral) {
+          return [{ kind: 'persistentvolumeclaims', name: `${object.metadata.name}-${volume.name}`, namespace }];
+        }
+        return [];
+      });
+    case 'services':
+      // An ExternalName Service is a DNS alias with nothing behind it. Every
+      // other type has an Endpoints of its own name, kept by the control plane
+      // from the selector, or by hand for a Service without one.
+      return spec.type === 'ExternalName' ? [] : [{ kind: 'endpoints', name: object.metadata.name, namespace }];
+    case 'endpoints':
+      return [{ kind: 'services', name: object.metadata.name, namespace }];
+    case 'ingresses': {
+      // networking.k8s.io/v1 names `service.name`; the v1beta1 shape some
+      // clusters still serve names `serviceName`.
+      const backends: any[] = [
+        spec.defaultBackend ?? spec.backend,
+        ...(spec.rules ?? []).flatMap((rule: any) => (rule.http?.paths ?? []).map((path: any) => path.backend))
+      ];
+      const names = new Set(backends.map((b) => b?.service?.name ?? b?.serviceName).filter(Boolean));
+      return [...names].map((name) => ({ kind: 'services', name, namespace }));
+    }
+    case 'events': {
+      const involved = (object as any).involvedObject ?? (object as any).regarding ?? {};
+      const target = kindIdOf(involved.kind);
+      if (!target || !involved.name) return [];
+      const namespaced = kindById(target)?.namespaced;
+      return [{ kind: target, name: involved.name, ...(namespaced ? { namespace: involved.namespace ?? namespace } : {}) }];
+    }
+    case 'horizontalpodautoscalers': {
+      const target = kindIdOf(spec.scaleTargetRef?.kind);
+      return target && spec.scaleTargetRef.name ? [{ kind: target, name: spec.scaleTargetRef.name, namespace }] : [];
+    }
+    case 'persistentvolumeclaims':
+      return spec.volumeName ? [{ kind: 'persistentvolumes', name: spec.volumeName }] : [];
+    case 'persistentvolumes':
+      return spec.claimRef?.name
+        ? [{ kind: 'persistentvolumeclaims', name: spec.claimRef.name, namespace: spec.claimRef.namespace }]
+        : [];
+    case 'rolebindings':
+    case 'clusterrolebindings': {
+      const ref = (object as any).roleRef ?? {};
+      if (!ref.name) return [];
+      // A RoleBinding may grant a ClusterRole; a Role is always the binding's own namespace's.
+      const role: Link = ref.kind === 'ClusterRole'
+        ? { kind: 'clusterroles', name: ref.name }
+        : { kind: 'roles', name: ref.name, namespace };
+      const accounts = ((object as any).subjects ?? [])
+        .filter((s: any) => s.kind === 'ServiceAccount' && s.name)
+        .map((s: any): Link => ({ kind: 'serviceaccounts', name: s.name, namespace: s.namespace ?? namespace }));
+      return [role, ...accounts];
+    }
+    default:
+      return [];
+  }
 }
 
 interface Built {

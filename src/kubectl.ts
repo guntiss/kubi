@@ -303,18 +303,25 @@ export async function listNamespaces(context: string): Promise<string[]> {
   return list.items.map((i) => i.metadata.name).sort();
 }
 
-/** Lists a resource type. Pass namespace `undefined` for cluster-scoped kinds. */
+/**
+ * Lists a resource type. Pass namespace `undefined` for cluster-scoped kinds,
+ * and a label `selector` (`app=web,tier=front`) to list only what it matches.
+ */
 export async function list(
   resource: string,
   context: string,
   namespace?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  selector?: string
 ): Promise<KubeObject[]> {
   const args = ['get', resource];
   if (namespace === ALL_NAMESPACES) {
     args.push('--all-namespaces');
   } else if (namespace) {
     args.push('-n', namespace);
+  }
+  if (selector) {
+    args.push('-l', selector);
   }
   const response = await runJson<ListResponse<KubeObject>>(args, context, signal);
   return response.items ?? [];

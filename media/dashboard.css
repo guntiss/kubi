@@ -2409,6 +2409,37 @@ body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackg
   background: var(--vscode-menu-separatorBackground, var(--border));
 }
 
+/*
+ * Go to's items name the object after the kind, and a submenu's parent has a
+ * chevron; both sit at the far edge, so the labels keep one left edge. A long
+ * pod or node name is cut short here and read in full from the tooltip.
+ */
+.row-menu button.has-hint,
+.row-menu button.has-submenu { display: flex; align-items: center; }
+.row-menu .menu-hint {
+  margin-left: auto;
+  padding-left: 24px;
+  min-width: 0;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.7;
+}
+.row-menu button.has-submenu::after {
+  content: '›';
+  margin: -2px 0 -2px auto;
+  padding-left: 24px;
+  font-size: 1.2em;
+  line-height: 1;
+}
+/* The parent stays lit while its submenu is open, so the eye can follow where it came from. */
+.row-menu button[aria-expanded="true"] {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}
+/* Above its parent menu where the two overlap at the seam. */
+.row-menu.submenu { z-index: 41; }
+
 /* ---------- a Secret's keys, in its details modal ---------- */
 
 .secret-data { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }

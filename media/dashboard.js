@@ -116,7 +116,12 @@
      * which every pod row already carries, so it is set here in the view
      * without asking the extension.
      *
-     * @type {{kind: string, name: string, namespace?: string, owners: string[]} | null}
+     * A Service owns nothing either: its pods are whatever its label selector
+     * matches. Pod rows carry no labels, so the extension lists the matches
+     * and `owners` holds their pod names instead, with the `selector` itself
+     * alongside for the chip to show.
+     *
+     * @type {{kind: string, name: string, namespace?: string, owners: string[], selector?: string} | null}
      */
     scope: null,
     /**
@@ -1795,7 +1800,9 @@
   /** What the scope narrows to, in prose: 'owned by deployment web' or 'on node ip-10-0-1-5'. */
   function scopeSummary() {
     const { kind, name } = state.scope;
-    return kind === 'nodes' ? `on node ${name}` : `owned by ${singularOf(kind).toLowerCase()} ${name}`;
+    if (kind === 'nodes') return `on node ${name}`;
+    if (kind === 'services') return `selected by service ${name}`;
+    return `owned by ${singularOf(kind).toLowerCase()} ${name}`;
   }
 
   /** A kind's singular label, for prose: 'deployments' -> 'Deployment'. */
@@ -1813,13 +1820,17 @@
    */
   function renderScopeChip() {
     if (!state.scope) return null;
-    const { kind, name, namespace, owners } = state.scope;
+    const { kind, name, namespace, owners, selector } = state.scope;
     // A Deployment matches through its ReplicaSets, and how many were found is
     // the difference between "no pods yet" and "the rollout has two revisions
-    // live" — worth having in reach without being in the way.
-    const via = kind === 'nodes' || (owners.length === 1 && owners[0] === name)
-      ? ''
-      : `\nMatching ${owners.length} ${owners.length === 1 ? 'ReplicaSet' : 'ReplicaSets'}: ${owners.join(', ') || 'none'}`;
+    // live" — worth having in reach without being in the way. A Service's
+    // owners are its pods, which the table already lists; its selector is the
+    // part that is not on screen.
+    const via = kind === 'services'
+      ? (selector ? `\nSelector: ${selector}` : '')
+      : kind === 'nodes' || (owners.length === 1 && owners[0] === name)
+        ? ''
+        : `\nMatching ${owners.length} ${owners.length === 1 ? 'ReplicaSet' : 'ReplicaSets'}: ${owners.join(', ') || 'none'}`;
     return el('div', {
       class: 'scope-chip',
       title: `Showing only pods ${scopeSummary()}`
@@ -2792,12 +2803,14 @@
    * True when a row belongs to the workload the table is scoped to. A pod
    * qualifies by naming one of the scope's owners — its ReplicaSet, or the
    * workload itself — and by sitting in the same namespace, since owner names
-   * are only unique within one.
+   * are only unique within one. A Service's pods qualify by name, from the
+   * list its selector matched.
    */
   function inScope(row) {
     if (!state.scope) return true;
     if (state.scope.kind === 'nodes') return row.cells.node === state.scope.name;
     if (state.scope.namespace && row.namespace !== state.scope.namespace) return false;
+    if (state.scope.kind === 'services') return state.scope.owners.includes(row.name);
     return Boolean(row.owner && state.scope.owners.includes(row.owner.name));
   }
 
@@ -4954,11 +4967,15 @@
     // than acting on the object.
     if (ownsPods(kind.id)) {
       actions.push({
+        // Picked out by the row menu, which files it under Go to.
+        id: 'pods',
         label: 'Pods',
         run: () => { selectRow(null); showOwned(kind.id, row); },
         title: kind.id === 'nodes'
           ? 'Show only the pods running on this node'
-          : `Show only the pods of this ${kind.singular.toLowerCase()}`
+          : kind.id === 'services'
+            ? 'Show only the pods this service selects'
+            : `Show only the pods of this ${kind.singular.toLowerCase()}`
       });
     }
     // A workload's logs and shell, through kubectl's own `Kind/name` form:
@@ -5070,25 +5087,7 @@
    * right edge of that button.
    */
   function showMenu(items, point, { key = null, anchor = null, alignRight = false } = {}) {
-    const run = (fn) => () => { closeRowMenu(); fn(); };
-    const buttons = [];
-    const checks = items.some((item) => item && item.checked !== undefined);
-    const menu = el('div', { class: 'row-menu' + (checks ? ' has-checks' : ''), role: 'menu' },
-      ...items.map((item) => {
-        if (!item) return el('div', { class: 'separator', role: 'separator' });
-        const checkable = item.checked !== undefined;
-        const button = el('button', {
-          class: item.variant === 'danger' ? 'danger' : '',
-          role: checkable ? 'menuitemcheckbox' : 'menuitem',
-          'aria-checked': checkable ? String(item.checked) : undefined,
-          disabled: item.disabled,
-          title: item.title,
-          onclick: run(item.run)
-        }, item.label);
-        if (!item.disabled) buttons.push(button);
-        return button;
-      })
-    );
+    const { menu, buttons } = buildMenu(items);
     document.body.appendChild(menu);
 
     const box = menu.getBoundingClientRect();
@@ -5099,7 +5098,120 @@
       : point.y;
     menu.style.left = `${Math.max(4, x)}px`;
     menu.style.top = `${y}px`;
-    rowMenu = { menu, key, buttons, anchor };
+    rowMenu = { menu, key, buttons, anchor, sub: null };
+  }
+
+  /**
+   * One level of a menu: its element, and the buttons the arrow keys walk.
+   * An item with `submenu` opens those items beside it — on hover, a click or
+   * the right arrow — and does nothing itself; one level deep is all there
+   * is. `hint` is dim text after the label, the way a menu shows a shortcut.
+   */
+  function buildMenu(items) {
+    const run = (fn) => () => { closeRowMenu(); fn(); };
+    const buttons = [];
+    const checks = items.some((item) => item && item.checked !== undefined);
+    const menu = el('div', { class: 'row-menu' + (checks ? ' has-checks' : ''), role: 'menu' },
+      ...items.map((item) => {
+        if (!item) return el('div', { class: 'separator', role: 'separator' });
+        const checkable = item.checked !== undefined;
+        const parent = Boolean(item.submenu);
+        const button = el('button', {
+          class: [
+            item.variant === 'danger' ? 'danger' : '',
+            parent ? 'has-submenu' : '',
+            item.hint ? 'has-hint' : ''
+          ].filter(Boolean).join(' '),
+          role: checkable ? 'menuitemcheckbox' : 'menuitem',
+          'aria-checked': checkable ? String(item.checked) : undefined,
+          'aria-haspopup': parent ? 'menu' : undefined,
+          'aria-expanded': parent ? 'false' : undefined,
+          disabled: item.disabled,
+          title: item.title,
+          onclick: parent ? () => openSubmenu(button, item.submenu, true) : run(item.run),
+          onmouseenter: () => hoverMenuItem(button, item)
+        }, el('span', { class: 'menu-label', text: item.label }),
+          item.hint ? el('span', { class: 'menu-hint', text: item.hint }) : null);
+        if (!item.disabled) buttons.push(button);
+        return button;
+      })
+    );
+    return { menu, buttons };
+  }
+
+  /**
+   * The pending close of an open submenu, set when the pointer moves onto
+   * another item of the menu it hangs from. The way across to a submenu
+   * usually clips the items below its parent, and closing on the first touch
+   * would take the submenu away from under a pointer heading into it.
+   */
+  let submenuCloseTimer = 0;
+
+  /** The pointer reaching a menu item: opens its submenu, or starts closing the one open. */
+  function hoverMenuItem(button, item) {
+    if (!rowMenu) return;
+    if (rowMenu.sub && rowMenu.sub.menu.contains(button)) {
+      clearTimeout(submenuCloseTimer);
+      return;
+    }
+    if (item.submenu) {
+      if (!item.disabled) openSubmenu(button, item.submenu, false);
+      return;
+    }
+    if (rowMenu.sub) {
+      clearTimeout(submenuCloseTimer);
+      submenuCloseTimer = setTimeout(() => closeSubmenu(false), 250);
+    }
+  }
+
+  /**
+   * Opens `items` as the submenu of `button`, beside the menu it is in with
+   * its first item level with `button`, and on the left instead where the
+   * right edge of the panel would cut it off. `focus` moves the keyboard
+   * into it, for a click or the right arrow; a hover leaves focus be.
+   */
+  function openSubmenu(button, items, focus) {
+    clearTimeout(submenuCloseTimer);
+    if (rowMenu.sub && rowMenu.sub.parent === button) {
+      if (focus) rowMenu.sub.buttons[0]?.focus();
+      return;
+    }
+    closeSubmenu(false);
+    const { menu, buttons } = buildMenu(items);
+    menu.classList.add('submenu');
+    menu.addEventListener('mouseenter', () => clearTimeout(submenuCloseTimer));
+    document.body.appendChild(menu);
+
+    const parent = rowMenu.menu.getBoundingClientRect();
+    const item = button.getBoundingClientRect();
+    const box = menu.getBoundingClientRect();
+    // Overlapping the parent menu's edge by a couple of pixels, so the way
+    // across has no gap in it that counts as leaving both. The top is pulled
+    // up by the submenu's own border and padding to line the items up.
+    const right = parent.right - 2;
+    const left = right + box.width > window.innerWidth - 4 ? parent.left - box.width + 2 : right;
+    const top = Math.min(item.top - 5, window.innerHeight - box.height - 4);
+    menu.style.left = `${Math.max(4, left)}px`;
+    menu.style.top = `${Math.max(4, top)}px`;
+    button.setAttribute('aria-expanded', 'true');
+    rowMenu.sub = { menu, buttons, parent: button };
+    if (focus) buttons[0]?.focus();
+  }
+
+  /** Closes the open submenu, if any; `refocus` puts the keyboard back on its parent item. */
+  function closeSubmenu(refocus) {
+    clearTimeout(submenuCloseTimer);
+    const sub = rowMenu && rowMenu.sub;
+    if (!sub) return;
+    sub.menu.remove();
+    sub.parent.setAttribute('aria-expanded', 'false');
+    rowMenu.sub = null;
+    if (refocus) sub.parent.focus();
+  }
+
+  /** Whether `node` is inside the open menu or its submenu. */
+  function inRowMenu(node) {
+    return rowMenu.menu.contains(node) || Boolean(rowMenu.sub && rowMenu.sub.menu.contains(node));
   }
 
   /**
@@ -5133,6 +5245,11 @@
     // A previous container only exists once one has died; `kubectl logs -p`
     // errors out otherwise, so the item is absent until a restart happens.
     const restarted = ordinary.some((c) => c.restarts);
+    const actions = objectActions(kind, row);
+    // Drilling into the pods is a place to go rather than something done to
+    // the object, so here it joins the other destinations under Go to.
+    const pods = actions.find((a) => a.id === 'pods');
+    const destinations = [...goToItems(kind, row), ...(pods ? [pods] : [])];
     return [
       { label: 'Describe', run: () => { selectRow(row); openDetailTab('describe'); }, title: 'kubectl describe, in the detail panel' },
       ...(pod ? [
@@ -5149,13 +5266,81 @@
           title: running ? 'kubectl exec into the default container' : 'Only a running container can be shelled into'
         }
       ].filter(Boolean) : []),
+      ...(destinations.length ? [{ label: 'Go to', submenu: destinations }] : []),
       null,
-      ...objectActions(kind, row)
+      ...actions.filter((a) => a !== pods)
     ];
+  }
+
+  /**
+   * The controller above a pod's owner that its row cannot name, keyed by the
+   * owner's Kind: the Deployment over a ReplicaSet, the CronJob over a Job.
+   * The extension reads the owner to find it, so the item is offered on how
+   * likely it is to be there. Nearly every ReplicaSet is a Deployment's. Most
+   * Jobs are not a CronJob's, so a Job counts only when it carries the name a
+   * CronJob gives its jobs — its scheduled time in minutes — or the one Kubi's
+   * Trigger now does.
+   */
+  const OWNER_ABOVE = {
+    ReplicaSet: { kind: 'Deployment', likely: () => true },
+    Job: { kind: 'CronJob', likely: (name) => /-\d{8,}$|-manual-\d+$/.test(name) }
+  };
+
+  /** The kind Kubi lists an API Kind under, if any: 'StatefulSet' -> the statefulsets kind. */
+  function kindBySingular(apiKind) {
+    return state.kinds.find((k) => k.singular === apiKind);
+  }
+
+  /**
+   * Where the row menu's Go to leads from `row`, besides its pods: the node a
+   * pod runs on, the controllers above it, and whatever else the object names
+   * (`links`, see `linksOf` in model.ts). Each opens that object as if its
+   * row had been clicked, with a way back to this one.
+   */
+  function goToItems(kind, row) {
+    const from = { kind: kind.id, name: row.name, namespace: row.namespace };
+    const items = [];
+    const seen = new Set();
+    const jump = (target) => {
+      const key = `${target.kind}\u0000${rowKey(target)}`;
+      // A link to a kind this build does not list has no table to land on,
+      // and a pod's owner can be its node again — a static pod's mirror.
+      if (!kindOf(target.kind) || seen.has(key)) return;
+      seen.add(key);
+      const label = singularOf(target.kind);
+      items.push({
+        label,
+        hint: target.name,
+        title: `Open ${label} ${target.namespace ? `${target.namespace}/${target.name}` : target.name}`,
+        run: () => { pendingOrigin = from; goTo(target); }
+      });
+    };
+
+    if (kind.id === 'pods' && row.cells.node) jump({ kind: 'nodes', name: row.cells.node });
+    const owner = row.owner && kindBySingular(row.owner.kind);
+    if (owner) {
+      // Outermost first: a pod is usually thought of as its Deployment's, and
+      // the ReplicaSet in between is the detail.
+      const above = kind.id === 'pods' && OWNER_ABOVE[row.owner.kind];
+      if (above && above.likely(row.owner.name)) {
+        items.push({
+          label: above.kind,
+          title: `Open the ${above.kind} that owns ${row.owner.kind} ${row.owner.name}`,
+          run: () => {
+            pendingOrigin = from;
+            post({ type: 'goToOwner', kind: owner.id, name: row.owner.name, namespace: row.namespace, owner: above.kind });
+          }
+        });
+      }
+      jump({ kind: owner.id, name: row.owner.name, namespace: owner.namespaced ? row.namespace : undefined });
+    }
+    for (const link of row.links || []) jump(link);
+    return items;
   }
 
   function closeRowMenu() {
     if (!rowMenu) return;
+    closeSubmenu(false);
     rowMenu.menu.remove();
     rowMenu = null;
     for (const tr of app.querySelectorAll('tr.menu-open')) tr.classList.remove('menu-open');
@@ -5166,9 +5351,9 @@
     return Boolean(rowMenu) && rowMenu.key === rowKey(row);
   }
 
-  /** Arrow keys walk the menu's items, wrapping at either end. */
+  /** Arrow keys walk the items of the menu or submenu holding focus, wrapping at either end. */
   function stepRowMenu(step) {
-    const { buttons } = rowMenu;
+    const { buttons } = rowMenu.sub && rowMenu.sub.menu.contains(document.activeElement) ? rowMenu.sub : rowMenu;
     if (!buttons.length) return;
     const at = buttons.indexOf(document.activeElement);
     const next = at === -1
@@ -5180,7 +5365,7 @@
   // Anything that moves the ground under the menu dismisses it: a press
   // anywhere else, a scroll, or the panel losing focus or size.
   document.addEventListener('mousedown', (e) => {
-    if (!rowMenu || rowMenu.menu.contains(e.target)) return;
+    if (!rowMenu || inRowMenu(e.target)) return;
     // The button that opened it closes it again on its own click, which this
     // would otherwise beat to it — and the click would then reopen it.
     if (rowMenu.anchor && rowMenu.anchor.contains(e.target)) return;
@@ -6457,9 +6642,10 @@
    * Kinds whose rows have pods underneath them. A CronJob reaches them through
    * its Jobs and a Deployment through its ReplicaSets; the extension walks
    * whichever hop is needed, so this list is just "does asking make sense".
-   * A node does not own its pods but hosts them, and gets the same jump.
+   * A node does not own its pods but hosts them, and a Service selects them;
+   * both get the same jump.
    */
-  const POD_OWNERS = ['deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs', 'replicasets', 'nodes'];
+  const POD_OWNERS = ['deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs', 'replicasets', 'nodes', 'services'];
 
   function ownsPods(kindId) {
     return POD_OWNERS.includes(kindId);
@@ -6509,11 +6695,73 @@
     render();
   }
 
+  /**
+   * The object a Go to is on its way to, until a payload for its table comes
+   * in and `revealPending` opens it. Any other kind switch drops it, so a slow
+   * load cannot open a panel over a table the user has since left.
+   * @type {{kind: string, name: string, namespace?: string} | null}
+   */
+  let pendingReveal = null;
+
+  /**
+   * Opens one object, as if its row had been clicked in its own table: the
+   * table, the cursor on the row and its panel open. The back button returns
+   * to where the jump started, claimed from `pendingOrigin` the same way a
+   * drill-down claims it.
+   */
+  function goTo(target) {
+    const origin = pendingOrigin;
+    pendingOrigin = null;
+    select(target.kind);
+    state.origin = origin;
+    // A picker narrowed to another namespace would hide the row. One already
+    // showing it — all namespaces included — is left alone, so the jump
+    // narrows nothing that was not in the way.
+    if (target.namespace && state.namespace && state.namespace !== state.allNamespaces
+      && state.namespace !== target.namespace) {
+      state.namespace = target.namespace;
+      post({ type: 'setNamespace', namespace: state.namespace });
+    }
+    state.cursor = rowKey(target);
+    pendingReveal = { kind: target.kind, name: target.name, namespace: target.namespace };
+    render();
+  }
+
+  /**
+   * Opens the object a Go to is waiting on, once the rows on screen hold it,
+   * and reports whether it did. Cached rows without it are no verdict, since
+   * the fresh ones behind them may have it; fresh rows without it mean it is
+   * gone, or never was — a Service with no Endpoints — and the wait ends.
+   */
+  function revealPending(fresh) {
+    if (!pendingReveal || pendingReveal.kind !== state.active) return false;
+    // A row opened by hand while the table loaded wins over the jump.
+    if (state.selected) {
+      pendingReveal = null;
+      return false;
+    }
+    const key = rowKey(pendingReveal);
+    const row = state.rows.find((r) => rowKey(r) === key);
+    if (!row) {
+      if (fresh) {
+        post({ type: 'goToMissing', ...pendingReveal });
+        pendingReveal = null;
+      }
+      return false;
+    }
+    pendingReveal = null;
+    state.cursor = key;
+    selectRow(row);
+    return true;
+  }
+
   function select(kindId) {
     const switching = kindId !== state.active;
     state.active = kindId;
     selectRow(null);
     if (switching) {
+      // A Go to sets its own after this runs, as `showOwned` does its scope.
+      pendingReveal = null;
       // A row key is only unique within a kind, so ticks cannot travel between
       // tables — a pod and a service of the same name would be the same key.
       clearChecked();
@@ -6707,8 +6955,10 @@
         // are exempt: they are what was already on screen, or the first thing
         // to arrive for this kind, and neither is a change the user missed.
         flashChangedRows = !message.stale && hadRows;
+        const revealed = revealPending(!message.stale);
         renderContentOnly();
         flashChangedRows = false;
+        if (revealed) scrollCursorIntoView();
         // Both pickers count over the rows, so they go stale the moment a new
         // payload lands. Switching kinds empties the table before the fetch,
         // and the render that follows builds the row against no rows at all —
@@ -6756,6 +7006,11 @@
           post({ type: 'setNamespace', namespace: state.namespace });
         }
         render();
+        break;
+      case 'goTo':
+        // A controller further up than the row could name — a pod's
+        // Deployment — found by the extension; see `goToOwner` there.
+        goTo({ kind: message.kind, name: message.name, namespace: message.namespace });
         break;
       case 'scope':
         // Which owners count, resolved by the extension. A resolve that failed
@@ -6924,11 +7179,20 @@
     // outside it, and nothing behind a modal should react.
     if (deleteDialog) return;
 
-    // An open context menu has the keyboard to itself.
+    // An open context menu has the keyboard to itself. Escape and the left
+    // arrow back out of a submenu one level at a time, as VS Code's do.
     if (rowMenu) {
-      if (e.key === 'Escape' || e.key === 'Tab') {
+      const inSub = Boolean(rowMenu.sub) && rowMenu.sub.menu.contains(document.activeElement);
+      if (e.key === 'Tab' || (e.key === 'Escape' && !rowMenu.sub)) {
         e.preventDefault();
         closeRowMenu();
+      } else if (e.key === 'Escape' || (e.key === 'ArrowLeft' && inSub)) {
+        e.preventDefault();
+        closeSubmenu(inSub);
+      } else if (e.key === 'ArrowRight' && document.activeElement?.classList.contains('has-submenu')
+        && rowMenu.menu.contains(document.activeElement)) {
+        e.preventDefault();
+        document.activeElement.click();
       } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         stepRowMenu(e.key === 'ArrowDown' ? 1 : -1);
