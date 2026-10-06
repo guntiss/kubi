@@ -202,9 +202,10 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
 }
 
 /*
- * A section heading. The whole row is the fold toggle, so it is a real button
- * reset out of its chrome — keyboard-reachable and announcing its state, like
- * the Overview's reason groups.
+ * More's heading, over the kinds the rail does not keep. The whole row is the
+ * fold toggle, so it is a real button reset out of its chrome —
+ * keyboard-reachable and announcing its state, like the Overview's reason
+ * groups.
  */
 .rail-group {
   display: flex;
@@ -246,7 +247,7 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* What a folded section holds, so the heading still says what is behind it. */
+/* What folded More holds, so the heading still says what is behind it. */
 .rail-count {
   margin-left: auto;
   font-size: 0.78em;
@@ -272,6 +273,82 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
 }
 .nav-item .glyph { width: 14px; text-align: center; flex: none; opacity: 0.85; }
 .nav-item .gear-mark { height: 14px; }
+/* Names are the API's plurals, and a larger font can still push one past the
+   rail's edge, where it is cut rather than wrapped. */
+.nav-item .label-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The entry a context menu was opened on, so it is clear what the menu acts on. */
+.nav-item.menu-open { box-shadow: inset 0 0 0 1px var(--vscode-focusBorder); }
+
+/*
+ * The + that keeps a More entry in the rail. Hidden until the entry is
+ * hovered, so More reads as a list rather than a column of buttons; it is a
+ * real button, so it is reachable without the pointer too.
+ */
+button.rail-add {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: -2px -4px -2px 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0;
+}
+.nav-item:hover button.rail-add,
+button.rail-add:focus-visible { opacity: 0.8; }
+button.rail-add:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+button.rail-add:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.plus-mark { width: 14px; height: 14px; }
+
+/* What the kinds under an unfolded More are for: quieter than More itself. */
+.rail-subhead {
+  /* Its overflow clip would otherwise let the column squeeze it to its
+     padding once the list outgrows the rail. */
+  flex: none;
+  padding: 8px 10px 2px 12px;
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Dragging an entry: it stays where it was, dimmed, while a line marks the gap
+ * it would drop into. Dragged onto More, More lights up instead, since that is
+ * where a kind taken off the list goes. The line is fixed on the body, as the
+ * table's column marker is, so the rail's scroller cannot clip it.
+ */
+.nav-item.rail-dragging { opacity: 0.5; }
+.rail-drop {
+  position: fixed;
+  z-index: 30;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--vscode-focusBorder);
+  pointer-events: none;
+}
+.rail-more.drop-target {
+  color: var(--vscode-foreground);
+  box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
+}
+body.rail-moving, body.rail-moving * { cursor: grabbing !important; }
+body.rail-moving .flyout { display: none !important; }
 
 /*
  * The label a collapsed glyph would otherwise hide, flown out on hover. It is
@@ -1944,6 +2021,7 @@ body.rail-collapsed {
 }
 body.rail-collapsed .label-text,
 body.rail-collapsed .context-box,
+body.rail-collapsed .rail-subhead,
 body.rail-collapsed .rail-label,
 body.rail-collapsed .rail-count,
 body.rail-collapsed .rail-jump-key,
@@ -1989,8 +2067,8 @@ body.rail-collapsed .brand .mark { width: 20px; height: 20px; }
 body.rail-collapsed .rail-scroll { overflow-y: auto; }
 
 /*
- * Section headings, in a strip with no room to print them: a rule between the
- * sections with the fold caret at its middle. Inset so it reads as a separator
+ * More's heading, in a strip with no room to print it: a rule under the kept
+ * kinds with the fold caret at its middle. Inset so it reads as a separator
  * rather than a second border beside the rail's own edge; the name flies out
  * on hover like any glyph's label.
  */

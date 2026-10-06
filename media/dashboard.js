@@ -17,7 +17,10 @@
    *  sort: {key: string, dir: number}, selected: any, generated: number}} */
   const state = {
     kinds: [],
-    /** Rail sections, in display order; sent with the kinds. @type {{id: string, label: string}[]} */
+    /**
+     * What each kind is for, in display order; sent with the kinds. They head
+     * the rail's More section. @type {{id: string, label: string}[]}
+     */
     groups: [],
     context: '',
     cluster: '',
@@ -25,12 +28,17 @@
     version: '',
     /** Rail narrowed to an icon strip. Persisted globally by the extension. */
     railCollapsed: false,
+    /** The kinds the rail lists until the user arranges it, by id. @type {string[]} */
+    railDefault: [],
     /**
-     * Rail sections the user has folded or opened, by group id; a group absent
-     * here keeps its default. Persisted globally by the extension.
-     * @type {Record<string, boolean>}
+     * The kinds the user keeps in the rail, in their order, or null while it is
+     * the default; see `railList`. One list for every context, persisted
+     * globally by the extension and pushed to the other open dashboards.
+     * @type {string[] | null}
      */
-    railGroups: {},
+    railKinds: null,
+    /** The rail's More section, the kinds not kept in it, is unfolded. Persisted globally. */
+    railMore: false,
     /**
      * Each table's columns as the user has arranged them — order, widths and
      * which are shown — by kind id; see `columnLayout`. A kind absent here
@@ -776,21 +784,26 @@
       collapsed ? el('span', { class: 'flyout' }, label) : null
     );
 
-    // Kinds are grouped by what they do, in the order the extension sent the
-    // groups, each section under a heading that folds it. A section with no
-    // kinds — everything filtered out by a future change, or a group nothing
-    // is assigned to — draws nothing rather than a heading over empty space.
-    const items = [navItem('overview', 'Overview', '◈')];
-    for (const group of state.groups) {
-      const members = state.kinds.filter((kind) => kind.group === group.id);
-      if (!members.length) continue;
-      const open = groupOpen(group);
-      // A folded section still lists the page on screen, so folding never
-      // hides where you are — nor does arriving somewhere by Go to or a
-      // drill-down leave the rail with nothing lit.
-      const shown = open ? members : members.filter((kind) => kind.id === state.active);
-      items.push(renderRailGroup(group, members.length, open, !open && shown.length > 0));
-      items.push(...shown.map((kind) => navItem(kind.id, kind.label, glyph(kind.id))));
+    // The kinds the user keeps come first, as one list in their order; the
+    // rest wait under More, sorted by what they are for.
+    const rest = moreKinds();
+    const items = [
+      navItem('overview', 'Overview', '◈'),
+      ...railList().map((id) => kindNavItem(kindOf(id), true))
+    ];
+    if (rest.length) {
+      const open = state.railMore;
+      // Folded, More still lists the page on screen, so folding never hides
+      // where you are — nor does arriving somewhere by Go to or a drill-down
+      // leave the rail with nothing lit.
+      const shown = open ? rest : rest.filter((kind) => kind.id === state.active);
+      items.push(renderMoreHeading(rest.length, open, !open && shown.length > 0));
+      for (const group of state.groups) {
+        const members = shown.filter((kind) => kind.group === group.id);
+        if (!members.length) continue;
+        if (open) items.push(el('div', { class: 'rail-subhead', text: group.label }));
+        items.push(...members.map((kind) => kindNavItem(kind, false)));
+      }
     }
 
     return el('div', { class: 'rail' },
@@ -842,53 +855,304 @@
   }
 
   /**
-   * A section heading, and the button that folds it. Folded, it carries the
-   * section's size, so a closed heading still says what is behind it.
+   * A kind's rail entry. `kept` says whether it is in the user's list or under
+   * More, which decides what its menu offers and where a drag can take it.
+   *
+   * A kind whose name is too wide for the rail shows its short name, with the
+   * full one on hover; the collapsed rail's flyout has room for the full one.
+   * Under More each entry carries a + to keep it, shown on hover, so finding
+   * a kind there is also the way to add it.
+   */
+  function kindNavItem(kind, kept) {
+    const collapsed = state.railCollapsed;
+    const id = kind.id;
+    const name = kind.short || kind.label;
+    return el('div', {
+      class: [
+        'nav-item',
+        kept ? 'kept' : '',
+        state.active === id ? 'active' : '',
+        rowMenu && rowMenu.key === railMenuKey(id) ? 'menu-open' : ''
+      ].filter(Boolean).join(' '),
+      'data-kind': id,
+      title: !collapsed && kind.short ? kind.label : null,
+      onclick: () => select(id),
+      oncontextmenu: (e) => openRailMenu(e, id),
+      onpointerdown: (e) => startRailDrag(e, id),
+      onmouseenter: collapsed ? placeFlyout : null,
+      onmouseleave: collapsed ? hideFlyout : null
+    },
+      el('span', { class: 'glyph', text: glyph(id) }),
+      el('span', { class: 'label-text', text: name }),
+      !kept && !collapsed ? el('button', {
+        class: 'rail-add',
+        type: 'button',
+        title: 'Add to sidebar',
+        'aria-label': `Add ${kind.label} to the sidebar`,
+        onclick: (e) => {
+          e.stopPropagation();
+          keepKind(id);
+        }
+      }, plusMark()) : null,
+      collapsed ? el('span', { class: 'flyout' }, kind.label) : null
+    );
+  }
+
+  /**
+   * The heading over the kinds not kept in the rail, and the button that
+   * folds them. Folded, it carries how many there are, so it still says what
+   * is behind it. It is also where a kept kind is dragged to put it back.
    *
    * Collapsed to the icon strip there is no room for the name, so the heading
-   * becomes a rule with the caret at its middle — the divider the strip always
-   * had between sections, now the place to fold them as well — and the name
-   * and size fly out on hover like any glyph's label.
+   * becomes a rule with the caret at its middle, and the name and count fly
+   * out on hover like any glyph's label.
    */
-  function renderRailGroup(group, size, open, holdsActive) {
+  function renderMoreHeading(size, open, holdsActive) {
     const collapsed = state.railCollapsed;
     return el('button', {
-      class: 'rail-group' + (open ? ' open' : '') + (holdsActive ? ' holds-active' : ''),
+      class: 'rail-group rail-more' + (open ? ' open' : '') + (holdsActive ? ' holds-active' : ''),
       type: 'button',
       'aria-expanded': open ? 'true' : 'false',
-      'aria-label': `${group.label}, ${size} ${size === 1 ? 'kind' : 'kinds'}`,
-      onclick: () => toggleGroup(group.id),
+      'aria-label': `More, ${size} ${size === 1 ? 'kind' : 'kinds'}`,
+      onclick: toggleMore,
+      oncontextmenu: (e) => openRailMenu(e, null),
       onmouseenter: collapsed ? placeFlyout : null,
       onmouseleave: collapsed ? hideFlyout : null
     },
       el('span', { class: 'rail-caret', 'aria-hidden': 'true' }),
-      el('span', { class: 'rail-label', text: group.label }),
+      el('span', { class: 'rail-label', text: 'More' }),
       open ? null : el('span', { class: 'rail-count', text: String(size) }),
-      collapsed ? el('span', { class: 'flyout' }, `${group.label} · ${size}`) : null
+      collapsed ? el('span', { class: 'flyout' }, `More · ${size}`) : null
     );
   }
 
-  /** Whether a section is unfolded: the user's last word on it, else its default. */
-  function groupOpen(group) {
-    return state.railGroups[group.id] ?? group.open !== false;
+  /**
+   * Folds or unfolds More. Only the rail redraws, so the table and its scroll
+   * stay as they were, and the choice is sent off to outlive the panel.
+   */
+  function toggleMore() {
+    state.railMore = !state.railMore;
+    post({ type: 'setRailMore', open: state.railMore });
+    renderRailOnly();
+  }
+
+  /** The kinds the rail lists, in order: the user's own, else the default. */
+  function railList() {
+    return (state.railKinds || state.railDefault).filter((id) => kindOf(id));
+  }
+
+  /** Every kind the rail does not list, in declaration order. */
+  function moreKinds() {
+    const kept = new Set(railList());
+    return state.kinds.filter((kind) => !kept.has(kind.id));
   }
 
   /**
-   * Folds or unfolds a section. Only the rail redraws, so the table and its
-   * scroll stay as they were, and the choice is sent off to outlive the panel.
+   * Stores a new rail list and redraws the rail. A list that has come back to
+   * the default is stored as no list at all, so it goes on following the
+   * default as releases change it.
    */
-  function toggleGroup(id) {
-    const group = state.groups.find((g) => g.id === id);
-    if (!group) return;
-    state.railGroups = { ...state.railGroups, [id]: !groupOpen(group) };
-    post({ type: 'setRailGroups', open: state.railGroups });
+  function saveRail(ids) {
+    const fallback = state.railDefault;
+    const isDefault = ids.length === fallback.length && ids.every((id, i) => id === fallback[i]);
+    state.railKinds = isDefault ? null : ids;
+    post({ type: 'setRailKinds', kinds: state.railKinds });
     renderRailOnly();
+  }
+
+  /** Adds a kind to the end of the rail's list. */
+  function keepKind(id) {
+    const list = railList();
+    if (!list.includes(id)) saveRail([...list, id]);
+  }
+
+  /** Takes a kind off the rail's list, back under More. */
+  function dropKind(id) {
+    saveRail(railList().filter((kept) => kept !== id));
+  }
+
+  /** Moves a kept kind to position `to` in the list. */
+  function moveKind(id, to) {
+    const list = railList().filter((kept) => kept !== id);
+    list.splice(Math.max(0, Math.min(to, list.length)), 0, id);
+    saveRail(list);
+  }
+
+  /** The open context menu's key for a rail entry; see `showMenu`. */
+  function railMenuKey(id) {
+    return `rail:${id}`;
+  }
+
+  /**
+   * The right-click menu on a rail entry: moving a kept kind, taking it off
+   * the list or adding one from More, and a way back to the default. `id` is
+   * null for the More heading, which only offers the way back.
+   */
+  function openRailMenu(e, id) {
+    e.preventDefault();
+    closeRowMenu();
+    hideFlyout(e);
+    const list = railList();
+    const at = id ? list.indexOf(id) : -1;
+    const reset = {
+      label: 'Reset sidebar',
+      disabled: !state.railKinds,
+      title: 'Put back the default kinds, in their default order',
+      run: () => saveRail(state.railDefault)
+    };
+    const items = !id ? [reset]
+      : at === -1 ? [
+        { label: 'Add to sidebar', run: () => keepKind(id) },
+        null,
+        reset
+      ] : [
+        { label: 'Move up', disabled: at === 0, run: () => moveKind(id, at - 1) },
+        { label: 'Move down', disabled: at === list.length - 1, run: () => moveKind(id, at + 1) },
+        null,
+        { label: 'Remove from sidebar', run: () => dropKind(id), title: 'Move it under More; Go to (:) still finds it' },
+        null,
+        reset
+      ];
+    showMenu(items, { x: e.clientX, y: e.clientY }, { key: id ? railMenuKey(id) : null });
+    if (id) e.currentTarget.classList.add('menu-open');
+  }
+
+  /**
+   * A rail entry being dragged to a new place, or null. It stays pending until
+   * the pointer has moved far enough to be a drag, so a click still opens it.
+   *
+   * Dropped among the kept kinds it goes where the line shows, which also
+   * keeps a kind dragged up from More; dropped on More it leaves the list.
+   * Nothing here holds a node: a refresh can redraw the rail mid-drag, so each
+   * move reads the entries afresh.
+   */
+  let railDrag = null;
+
+  function startRailDrag(e, id) {
+    if (e.button !== 0 || e.target.closest('.rail-add')) return;
+    railDrag = { id, startY: e.clientY, y: e.clientY, active: false, drop: undefined, marker: null, frame: 0 };
+    document.addEventListener('pointermove', onRailDragMove, true);
+    document.addEventListener('pointerup', endRailDrag, true);
+    document.addEventListener('pointercancel', endRailDrag, true);
+  }
+
+  function onRailDragMove(e) {
+    const drag = railDrag;
+    if (!drag) return;
+    // The button came up outside the panel, where the release was never heard.
+    if (!(e.buttons & 1)) {
+      endRailDrag(e);
+      return;
+    }
+    drag.y = e.clientY;
+    if (!drag.active) {
+      if (Math.abs(e.clientY - drag.startY) < MARQUEE_THRESHOLD) return;
+      drag.active = true;
+      closeRowMenu();
+      for (const flyout of app.querySelectorAll('.rail .flyout')) flyout.style.display = '';
+      document.body.classList.add('rail-moving');
+      drag.marker = document.body.appendChild(el('div', { class: 'rail-drop', hidden: true }));
+      drag.frame = requestAnimationFrame(scrollRailDrag);
+    }
+    placeRailDrop();
+  }
+
+  /**
+   * Works out where the entry would land and shows it: a line in the gap it
+   * would drop into, or More lit when it would leave the list. The gaps either
+   * side of a kept kind's own place are no move at all, and show nothing.
+   */
+  function placeRailDrop() {
+    const drag = railDrag;
+    const scroller = app.querySelector('.rail-scroll');
+    if (!scroller) return;
+    for (const node of app.querySelectorAll('.rail .nav-item[data-kind]')) {
+      node.classList.toggle('rail-dragging', node.dataset.kind === drag.id);
+    }
+    const kept = [...scroller.querySelectorAll('.nav-item.kept')];
+    const more = scroller.querySelector('.rail-more');
+    const from = kept.findIndex((node) => node.dataset.kind === drag.id);
+    const intoMore = Boolean(more) && drag.y >= more.getBoundingClientRect().top;
+    more?.classList.toggle('drop-target', intoMore && from !== -1);
+    if (intoMore) {
+      drag.drop = from === -1 ? undefined : 'more';
+      drag.marker.hidden = true;
+      return;
+    }
+    const boxes = kept.map((node) => node.getBoundingClientRect());
+    let index = boxes.findIndex((box) => drag.y < box.top + box.height / 2);
+    if (index === -1) index = kept.length;
+    if (from !== -1 && (index === from || index === from + 1)) {
+      drag.drop = undefined;
+      drag.marker.hidden = true;
+      return;
+    }
+    drag.drop = index;
+    // With nothing kept, the one gap there is sits over More.
+    const edge = index < boxes.length ? boxes[index].top
+      : boxes.length ? boxes[boxes.length - 1].bottom
+        : more ? more.getBoundingClientRect().top : scroller.getBoundingClientRect().top;
+    const box = scroller.getBoundingClientRect();
+    drag.marker.hidden = edge < box.top || edge > box.bottom;
+    drag.marker.style.top = `${Math.round(edge) - 1}px`;
+    drag.marker.style.left = `${box.left + 4}px`;
+    drag.marker.style.width = `${box.width - 8}px`;
+  }
+
+  /**
+   * Scrolls the rail while the pointer is held near its top or bottom edge, so
+   * a kind far down under More can be carried up into the list. Runs a frame
+   * at a time for as long as the drag does, since holding still sends no
+   * pointer events to scroll on.
+   */
+  function scrollRailDrag() {
+    const drag = railDrag;
+    if (!drag || !drag.active) return;
+    const scroller = app.querySelector('.rail-scroll');
+    if (scroller) {
+      const box = scroller.getBoundingClientRect();
+      const zone = 28;
+      const over = drag.y < box.top + zone ? drag.y - (box.top + zone)
+        : drag.y > box.bottom - zone ? drag.y - (box.bottom - zone) : 0;
+      if (over) {
+        const before = scroller.scrollTop;
+        scroller.scrollTop += Math.max(-12, Math.min(12, over / 2));
+        if (scroller.scrollTop !== before) placeRailDrop();
+      }
+    }
+    drag.frame = requestAnimationFrame(scrollRailDrag);
+  }
+
+  function endRailDrag(e) {
+    const drag = railDrag;
+    railDrag = null;
+    document.removeEventListener('pointermove', onRailDragMove, true);
+    document.removeEventListener('pointerup', endRailDrag, true);
+    document.removeEventListener('pointercancel', endRailDrag, true);
+    if (!drag || !drag.active) return;
+    cancelAnimationFrame(drag.frame);
+    document.body.classList.remove('rail-moving');
+    drag.marker.remove();
+    for (const node of app.querySelectorAll('.rail .rail-dragging')) node.classList.remove('rail-dragging');
+    app.querySelector('.rail .drop-target')?.classList.remove('drop-target');
+    if (e.type !== 'pointerup') return;
+    // The release would otherwise arrive as a click on the entry and open it.
+    swallowNextClick();
+    if (drag.drop === undefined || !kindOf(drag.id)) return;
+    if (drag.drop === 'more') {
+      dropKind(drag.id);
+      return;
+    }
+    // The index counts the dragged kind where it was, if it was kept; with it
+    // taken out first, every gap below its old place is one higher up.
+    const from = railList().indexOf(drag.id);
+    moveKind(drag.id, from !== -1 && from < drag.drop ? drag.drop - 1 : drag.drop);
   }
 
   /**
    * The rail's Go to box: a button dressed as a search field that opens the
    * kind list, the way the namespace picker opens its own. Thirty-odd kinds
-   * are faster typed than hunted for, folded sections included, and a k9s
+   * are faster typed than hunted for, More included, and a k9s
    * hand reaches for `:` — which opens this from anywhere outside a field.
    *
    * Collapsed to the strip it is just the magnifier, and its list opens beside
@@ -965,6 +1229,23 @@
       node.setAttribute('stroke-width', node === teeth ? '2.3' : '1.6');
       svg.appendChild(node);
     }
+    return svg;
+  }
+
+  /** The + on a More entry, drawn rather than typed for the gear's reason: a `+` is a speck at rail size. */
+  function plusMark() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'plus-mark');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', 'M8 3.5v9M3.5 8h9');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.6');
+    path.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(path);
     return svg;
   }
 
@@ -1380,28 +1661,28 @@
   }
 
   /**
-   * Every page the rail can open, in the rail's own order, folded sections
-   * included — reaching a kind without unfolding its section first is half of
-   * what Go to is for. `words` are matched whole or in part beside the label:
-   * the id, the singular, and kubectl's short names.
+   * Every page the rail can open, in the rail's own order, More included —
+   * reaching a kind the rail does not keep is half of what Go to is for.
+   * `words` are matched whole or in part beside the label: the id, the
+   * singular, the rail's short name and kubectl's short names.
    */
   function jumpTargets() {
     const page = (id, label, glyphText) => ({ id, label, glyph: glyphText, group: '', words: [], singular: '' });
-    const targets = [page('overview', 'Overview', '◈')];
-    for (const group of state.groups) {
-      for (const kind of state.kinds.filter((k) => k.group === group.id)) {
-        targets.push({
-          id: kind.id,
-          label: kind.label,
-          glyph: glyph(kind.id),
-          group: group.label,
-          words: [kind.id, kind.singular.toLowerCase(), ...(kind.aliases || [])],
-          singular: kind.singular
-        });
-      }
-    }
-    targets.push(page('about', 'About', 'ⓘ'));
-    return targets;
+    const target = (kind) => ({
+      id: kind.id,
+      label: kind.label,
+      glyph: glyph(kind.id),
+      group: state.groups.find((g) => g.id === kind.group)?.label ?? '',
+      words: [kind.id, kind.singular.toLowerCase(), ...(kind.short ? [kind.short.toLowerCase()] : []), ...(kind.aliases || [])],
+      singular: kind.singular
+    });
+    const rest = moreKinds();
+    return [
+      page('overview', 'Overview', '◈'),
+      ...railList().map((id) => target(kindOf(id))),
+      ...state.groups.flatMap((group) => rest.filter((kind) => kind.group === group.id).map(target)),
+      page('about', 'About', 'ⓘ')
+    ];
   }
 
   /**
@@ -1409,17 +1690,20 @@
    *
    *   0  a short name, the id or the singular, typed in full: `svc`, `pod`
    *   1  the label starts with it: "dep" is Deployments
-   *   2  a later word of the label does: "bind" finds both bindings
-   *   3  its initials do: "crb" is Cluster role bindings, "vwc" the
+   *   2  a later word of the label does: "bind" finds both bindings, and
+   *      "claim" PersistentVolumeClaims
+   *   3  its initials do: "crb" is ClusterRoleBindings, "vwc" the
    *      ValidatingWebhookConfigurations
    *   4  the label or a word holds it anywhere: "set" finds the *Sets
-   *   5  the section's name: "storage" lists what Storage holds
+   *   5  what it is for: "storage" lists what Storage holds
    */
   function jumpScore(target, q) {
     const label = target.label.toLowerCase();
     if (target.words.includes(q)) return 0;
     if (label.startsWith(q)) return 1;
-    const words = label.split(/\s+/);
+    // Labels are the API's plurals, so their words are run together and
+    // told apart by case: Persistent|Volume|Claims.
+    const words = target.label.split(/\s+|(?<=[a-z])(?=[A-Z])/).map((word) => word.toLowerCase());
     if (words.some((word) => word.startsWith(q))) return 2;
     if (q.length > 1) {
       const initials = [
@@ -1539,8 +1823,8 @@
       },
         el('span', { class: 'pick-glyph', text: target.glyph }),
         el('span', { class: 'pick-name' }, ...name),
-        // Which section it lives in, so a kind found here can be found again
-        // in the rail.
+        // What it is for, which is also the heading it sits under in More
+        // when the rail does not keep it.
         el('span', { class: 'pick-hint', text: target.group })));
     }
     activeKindOption()?.scrollIntoView({ block: 'nearest' });
@@ -5698,7 +5982,7 @@
     closeSubmenu(false);
     rowMenu.menu.remove();
     rowMenu = null;
-    for (const tr of app.querySelectorAll('tr.menu-open')) tr.classList.remove('menu-open');
+    for (const node of app.querySelectorAll('.menu-open')) node.classList.remove('menu-open');
   }
 
   /** Whether `row` is the one the open context menu acts on. */
@@ -7188,11 +7472,20 @@
         }
         state.railCollapsed = Boolean(message.railCollapsed);
         document.body.classList.toggle('rail-collapsed', state.railCollapsed);
-        state.railGroups = message.railGroups || {};
+        state.railDefault = message.railDefault || [];
+        state.railKinds = message.railKinds || null;
+        state.railMore = Boolean(message.railMore);
         state.columnLayouts = message.columnLayouts || {};
         state.dragToSelect = Boolean(message.dragToSelect);
         state.tableSparklines = Boolean(message.tableSparklines);
         render();
+        break;
+      case 'railKinds':
+        // The rail rearranged in another dashboard. A drag in progress here
+        // reads the entries afresh on its next move, so it carries on over
+        // the new list.
+        state.railKinds = message.kinds || null;
+        renderRailOnly();
         break;
       case 'columnLayouts':
         // Rearranged in another dashboard. The columns may differ, which the

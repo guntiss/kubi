@@ -4,17 +4,21 @@ import * as vscode from 'vscode';
 import * as k from './kubectl';
 import { DashboardCache } from './cache';
 import { metricsFor } from './metrics';
-import { GROUPS, KINDS, REFERENCES, Refs, Row, kindById, skew, toRow } from './model';
+import { GROUPS, KINDS, RAIL_DEFAULT, REFERENCES, Refs, Row, kindById, skew, toRow } from './model';
 
 /** Rail collapse is a global layout preference, shared by every context's panel. */
 const RAIL_COLLAPSED_KEY = 'kubi.railCollapsed';
 
 /**
- * Which rail sections the user has opened or folded, by group id. Only their
- * own choices are stored; a group missing here starts as `GROUPS` says, so a
- * section added later gets its default rather than whatever an old map implies.
+ * The kinds the user keeps in the rail, by id, in their order. Absent until
+ * they first change it, and cleared again when they put it back to
+ * `RAIL_DEFAULT`, so someone who never customised it follows the default as
+ * it changes in later releases.
  */
-const RAIL_GROUPS_KEY = 'kubi.railGroups';
+const RAIL_KINDS_KEY = 'kubi.railKinds';
+
+/** Whether the rail's More section, the kinds not kept in it, is unfolded. */
+const RAIL_MORE_KEY = 'kubi.railMore';
 
 /**
  * Each table's columns as the user has arranged them, by kind id. Only their
@@ -70,7 +74,9 @@ type Inbound =
   | { type: 'cancelLoad' }
   | { type: 'setNamespace'; namespace: string }
   | { type: 'setRailCollapsed'; collapsed: boolean }
-  | { type: 'setRailGroups'; open: Record<string, boolean> }
+  /** The rail's kinds, rearranged; null puts back the default. */
+  | { type: 'setRailKinds'; kinds: string[] | null }
+  | { type: 'setRailMore'; open: boolean }
   /** A table's columns were moved, resized, shown or hidden; null resets them. */
   | { type: 'setColumnLayout'; kind: string; layout: ColumnLayout | null }
   | { type: 'describe'; kind: string; name: string; namespace?: string }
@@ -445,6 +451,12 @@ export class DashboardPanel {
     );
   }
 
+  /** The user's rail, or undefined while it is the default. See RAIL_KINDS_KEY. */
+  private railKinds(): string[] | undefined {
+    const stored = this.extension.globalState.get<unknown>(RAIL_KINDS_KEY);
+    return Array.isArray(stored) ? knownKinds(stored) : undefined;
+  }
+
   private stateKey(): string {
     return `kubi.namespace:${this.contextName}`;
   }
@@ -666,16 +678,27 @@ export class DashboardPanel {
         // someone who wants the rail out of the way wants that everywhere.
         await this.extension.globalState.update(RAIL_COLLAPSED_KEY, message.collapsed);
         break;
-      case 'setRailGroups':
-        // Global for the same reason: which sections someone keeps open is
+      case 'setRailKinds': {
+        // Global for the same reason: which kinds someone keeps to hand is
         // about the work they do, not about the cluster they are looking at.
-        await this.extension.globalState.update(RAIL_GROUPS_KEY, message.open);
+        // Pushed to the other open dashboards too, so two side by side never
+        // disagree about it.
+        const kinds = message.kinds ? knownKinds(message.kinds) : undefined;
+        const stored = kinds && !sameList(kinds, RAIL_DEFAULT) ? kinds : undefined;
+        await this.extension.globalState.update(RAIL_KINDS_KEY, stored);
+        for (const panel of [...DashboardPanel.open.values()].flat()) {
+          if (panel !== this) panel.post({ type: 'railKinds', kinds: stored ?? null });
+        }
+        break;
+      }
+      case 'setRailMore':
+        await this.extension.globalState.update(RAIL_MORE_KEY, message.open);
         break;
       case 'setColumnLayout': {
-        // Global for the same reason again. Unlike the rail it is also pushed
-        // to the other open dashboards straight away: two tables of the same
-        // kind side by side, laid out differently until one is reloaded, would
-        // read as the change not having taken.
+        // Global for the same reason again, and pushed to the other open
+        // dashboards straight away like the rail's kinds: two tables of the
+        // same kind side by side, laid out differently until one is reloaded,
+        // would read as the change not having taken.
         const layouts = { ...this.extension.globalState.get<Record<string, ColumnLayout>>(COLUMN_LAYOUTS_KEY, {}) };
         if (message.layout) {
           layouts[message.kind] = message.layout;
@@ -776,7 +799,9 @@ export class DashboardPanel {
       // it before the load below starts filling it in.
       active: this.activeKind,
       railCollapsed: this.extension.globalState.get<boolean>(RAIL_COLLAPSED_KEY, false),
-      railGroups: this.extension.globalState.get<Record<string, boolean>>(RAIL_GROUPS_KEY, {}),
+      railDefault: RAIL_DEFAULT,
+      railKinds: this.railKinds() ?? null,
+      railMore: this.extension.globalState.get<boolean>(RAIL_MORE_KEY, false),
       columnLayouts: this.extension.globalState.get<Record<string, ColumnLayout>>(COLUMN_LAYOUTS_KEY, {}),
       dragToSelect: dragToSelect(),
       tableSparklines: tableSparklines()
@@ -2286,10 +2311,11 @@ export class DashboardPanel {
    */
   private bootShell(): string {
     const bar = (width: string) => `<span class="sk-bar" style="width:${width}"></span>`;
-    // Placeholder rail entries: the real list arrives with `init`, and its
-    // length is a property of the cluster, so this stands in at a fixed count
-    // rather than implying one.
-    const navRows = Array.from({ length: 10 }, () =>
+    // Placeholder rail entries: the real ones are drawn by the script, which
+    // holds the glyphs. How many there are is known here, though — Overview
+    // and the kinds the user keeps — so the list does not grow or shrink as
+    // the real one replaces it.
+    const navRows = Array.from({ length: 1 + (this.railKinds() ?? RAIL_DEFAULT).length }, () =>
       `<div class="nav-item"><span class="glyph">•</span>${bar('62%')}</div>`
     ).join('');
     return `<div class="rail">`
@@ -2699,6 +2725,19 @@ function terminalEnv(): Record<string, string> | undefined {
  */
 function isKnownKind(id: string): boolean {
   return id === 'overview' || id === 'about' || kindById(id) !== undefined;
+}
+
+/**
+ * A rail list with anything that is not a kind taken out, and each kind once.
+ * A stored list can outlive a kind a later release drops, and the rail has no
+ * way to draw an entry that opens nothing.
+ */
+function knownKinds(ids: unknown[]): string[] {
+  return [...new Set(ids.filter((id): id is string => typeof id === 'string' && kindById(id) !== undefined))];
+}
+
+function sameList(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 
 /** Whether a drag across a table draws a selection box. On unless turned off. */

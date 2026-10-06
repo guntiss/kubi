@@ -60,22 +60,34 @@ hand to a coding agent with the whole thing in view.
   so rather than claiming all is well.
 
 - **Resource tables** — compact, sortable, filterable tables with columns
-  matched to each kind, and statuses colored by health. The rail groups them into sections
-  that fold away; only Workloads and Cluster start open, and the rail remembers
-  what you open or fold:
+  matched to each kind, and statuses colored by health. The sidebar starts with
+  the kinds most sessions reach for: Pods, Deployments, StatefulSets,
+  DaemonSets, HPA, Nodes, Events, ConfigMaps, Secrets, PersistentVolumes, PVC,
+  StorageClasses and Services. The rest wait under **More**, sorted by what they
+  are for:
 
   | Group | Kinds |
   | --- | --- |
-  | Workloads | Pods, Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs, Autoscalers |
+  | Workloads | Pods, Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs, HorizontalPodAutoscalers |
   | Cluster | Nodes, Events, Namespaces |
-  | Network | Services, Ingresses, Endpoints, Network policies, Ingress classes |
+  | Network | Services, Ingresses, Endpoints, NetworkPolicies, IngressClasses |
   | Config | ConfigMaps, Secrets |
-  | Storage | Volume claims, Volumes, Storage classes |
-  | Policy | Resource quotas, Limit ranges, Disruption budgets, Priority classes, Validating webhooks, Mutating webhooks |
-  | Access | Service accounts, Roles, Role bindings, Cluster roles, Cluster role bindings |
+  | Storage | PersistentVolumeClaims, PersistentVolumes, StorageClasses |
+  | Policy | ResourceQuotas, LimitRanges, PodDisruptionBudgets, PriorityClasses, ValidatingWebhookConfigurations, MutatingWebhookConfigurations |
+  | Access | ServiceAccounts, Roles, RoleBindings, ClusterRoles, ClusterRoleBindings |
 
-  To skip the rail, press `:` (as in k9s) or click **Go to…** and type a kind's
-  name, its kubectl short name (`svc`, `cm`, `pvc`) or its initials (`crb`).
+  Kinds go by their Kubernetes names. The few too long for the sidebar show
+  their short name there instead (HPA, PVC, PDB), with the full name on hover.
+
+  Make the sidebar yours: drag a kind to reorder it, and drag it onto **More**
+  to remove it. Under **More**, hover a kind and click **+** to add it, or drag
+  it up into the list. Right-click any kind to move it up or down, add or remove
+  it, or **Reset sidebar** to the defaults. The sidebar is one list for every
+  context and every open dashboard.
+
+  To skip the sidebar, press `:` (as in k9s) or click **Go to…** and type a
+  kind's name, its kubectl short name (`svc`, `cm`, `pvc`) or its initials
+  (`crb`).
 
   Tick rows for the bulk actions with their checkboxes, or drag across the
   table to draw a selection box, as on the desktop: a plain drag replaces the

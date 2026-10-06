@@ -74,9 +74,11 @@ included, so it fills the activity bar's own padding rather than adding more.
 ## Conventions
 
 **Adding a resource kind** means adding it to `src/model.ts` — its columns, its
-row builder, and how its health is judged — and to the rail grouping. If it
-needs a `kubectl` call that doesn't exist yet, that call belongs in
-`src/kubectl.ts`.
+row builder, how its health is judged, and the group that sorts it under the
+rail's More. Its label is the API's plural, with a `short` name only if that is
+too wide for the rail. It joins `RAIL_DEFAULT` only if nearly every session
+needs it. If it needs a `kubectl` call that doesn't exist yet, that call belongs
+in `src/kubectl.ts`.
 
 **Health should reflect what actually goes wrong with that kind.** A bare phase
 is rarely the answer: a crash-looping pod is `phase: Running`, so pod status

@@ -195,34 +195,61 @@ export interface Link {
 }
 
 /**
- * Rail sections. A flat list of thirty kinds is a wall of names; grouping them
- * the way the API itself is organised lets someone find a kind by what it does
- * rather than by reading every entry. Order here is the order they appear.
- *
- * Every section folds, and `open` is how it starts before the user has chosen:
- * only the two that most sessions live in. The rest stay a heading apiece
- * until asked for, so the rail opens at about twenty rows rather than forty.
+ * What a kind is for, the way the API itself is organised. The rail lists the
+ * kinds the user keeps there as one list in their own order, so these only
+ * sort the rest: they head the rail's More section and name a kind's place in
+ * Go to. Order here is the order they appear in.
  *
  * Config is kept to ConfigMaps and Secrets — what nearly every visit to it is
- * for — and the cluster-wide guard rails it used to hold (quotas, limits,
- * disruption budgets, priorities, admission webhooks) have a section of their
- * own, most of them from the `policy` and admission APIs.
+ * for — and the cluster-wide guard rails (quotas, limits, disruption budgets,
+ * priorities, admission webhooks) have a section of their own, most of them
+ * from the `policy` and admission APIs.
  */
 export type KindGroup = 'cluster' | 'workloads' | 'network' | 'config' | 'storage' | 'policy' | 'access';
 
-export const GROUPS: { id: KindGroup; label: string; open: boolean }[] = [
-  { id: 'workloads', label: 'Workloads', open: true },
-  { id: 'cluster', label: 'Cluster', open: true },
-  { id: 'network', label: 'Network', open: false },
-  { id: 'config', label: 'Config', open: false },
-  { id: 'storage', label: 'Storage', open: false },
-  { id: 'policy', label: 'Policy', open: false },
-  { id: 'access', label: 'Access', open: false }
+export const GROUPS: { id: KindGroup; label: string }[] = [
+  { id: 'workloads', label: 'Workloads' },
+  { id: 'cluster', label: 'Cluster' },
+  { id: 'network', label: 'Network' },
+  { id: 'config', label: 'Config' },
+  { id: 'storage', label: 'Storage' },
+  { id: 'policy', label: 'Policy' },
+  { id: 'access', label: 'Access' }
+];
+
+/**
+ * The kinds the rail lists until the user arranges it: the ones nearly every
+ * session reaches for. Everything else waits under More, and in Go to. A user
+ * who has never customised the rail stores nothing, so a kind added here in a
+ * later release reaches them; one who has keeps their own list.
+ */
+export const RAIL_DEFAULT: string[] = [
+  'pods',
+  'deployments',
+  'statefulsets',
+  'daemonsets',
+  'horizontalpodautoscalers',
+  'nodes',
+  'events',
+  'configmaps',
+  'secrets',
+  'persistentvolumes',
+  'persistentvolumeclaims',
+  'storageclasses',
+  'services'
 ];
 
 export interface ResourceKind {
   id: string;
+  /** The plural of the API's Kind, as kubectl and the docs spell it. */
   label: string;
+  /**
+   * The rail's name for a kind whose label is too wide for it: kubectl's short
+   * name in capitals, the way people say it, or for the webhook configurations,
+   * which have none, the API type of the webhooks they hold. Everywhere with
+   * room — the title, Go to, the collapsed rail's flyout — uses the label.
+   */
+  short?: string;
   singular: string;
   namespaced: boolean;
   icon: string;
@@ -528,7 +555,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'networkpolicies',
-    label: 'Network policies',
+    label: 'NetworkPolicies',
     singular: 'NetworkPolicy',
     namespaced: true,
     icon: 'shield',
@@ -576,7 +603,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'serviceaccounts',
-    label: 'Service accounts',
+    label: 'ServiceAccounts',
     singular: 'ServiceAccount',
     namespaced: true,
     icon: 'account',
@@ -591,7 +618,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'resourcequotas',
-    label: 'Resource quotas',
+    label: 'ResourceQuotas',
     singular: 'ResourceQuota',
     namespaced: true,
     icon: 'gauge',
@@ -607,7 +634,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'limitranges',
-    label: 'Limit ranges',
+    label: 'LimitRanges',
     singular: 'LimitRange',
     namespaced: true,
     icon: 'ruler',
@@ -622,7 +649,8 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'horizontalpodautoscalers',
-    label: 'Autoscalers',
+    label: 'HorizontalPodAutoscalers',
+    short: 'HPA',
     singular: 'HorizontalPodAutoscaler',
     namespaced: true,
     icon: 'chart',
@@ -640,7 +668,8 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'persistentvolumeclaims',
-    label: 'Volume claims',
+    label: 'PersistentVolumeClaims',
+    short: 'PVC',
     singular: 'PersistentVolumeClaim',
     namespaced: true,
     icon: 'disk',
@@ -659,7 +688,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'persistentvolumes',
-    label: 'Volumes',
+    label: 'PersistentVolumes',
     singular: 'PersistentVolume',
     namespaced: false,
     icon: 'disk',
@@ -678,7 +707,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'storageclasses',
-    label: 'Storage classes',
+    label: 'StorageClasses',
     singular: 'StorageClass',
     namespaced: false,
     icon: 'stack',
@@ -695,7 +724,8 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'poddisruptionbudgets',
-    label: 'Disruption budgets',
+    label: 'PodDisruptionBudgets',
+    short: 'PDB',
     singular: 'PodDisruptionBudget',
     namespaced: true,
     icon: 'shield',
@@ -714,7 +744,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'priorityclasses',
-    label: 'Priority classes',
+    label: 'PriorityClasses',
     singular: 'PriorityClass',
     namespaced: false,
     icon: 'stack',
@@ -732,7 +762,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'ingressclasses',
-    label: 'Ingress classes',
+    label: 'IngressClasses',
     singular: 'IngressClass',
     namespaced: false,
     icon: 'globe',
@@ -747,7 +777,8 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'validatingwebhookconfigurations',
-    label: 'Validating webhooks',
+    label: 'ValidatingWebhookConfigurations',
+    short: 'ValidatingWebhooks',
     singular: 'ValidatingWebhookConfiguration',
     namespaced: false,
     icon: 'shield',
@@ -756,7 +787,8 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'mutatingwebhookconfigurations',
-    label: 'Mutating webhooks',
+    label: 'MutatingWebhookConfigurations',
+    short: 'MutatingWebhooks',
     singular: 'MutatingWebhookConfiguration',
     namespaced: false,
     icon: 'shield',
@@ -780,7 +812,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'rolebindings',
-    label: 'Role bindings',
+    label: 'RoleBindings',
     singular: 'RoleBinding',
     namespaced: true,
     icon: 'link',
@@ -796,7 +828,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'clusterroles',
-    label: 'Cluster roles',
+    label: 'ClusterRoles',
     singular: 'ClusterRole',
     namespaced: false,
     icon: 'lock',
@@ -810,7 +842,7 @@ const DECLARED_KINDS: ResourceKind[] = [
   },
   {
     id: 'clusterrolebindings',
-    label: 'Cluster role bindings',
+    label: 'ClusterRoleBindings',
     singular: 'ClusterRoleBinding',
     namespaced: false,
     icon: 'link',
