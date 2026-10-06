@@ -55,6 +55,10 @@ activity bar, and inline in both `src/panel.ts` (`BRAND_MARK`) and
 inline copies share their path data, and the `mark-hex`/`mark-bolt` classes the
 rail's hover animation moves them by; change one and change the other.
 
+The About page's header draws the whole tile inline too, as `brandTile()` in
+`media/dashboard.js`, with the same paths and colours as `media/icon.svg`; a
+change to the tile is a change to both.
+
 Everywhere but the tile the mark is a single colour: the activity bar masks it
 to a flat silhouette, and the rail tints it with `currentColor`. So the bolt and
 the hexagon must never touch — there is no keyline to separate them once the

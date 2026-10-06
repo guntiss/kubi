@@ -802,7 +802,8 @@ export class DashboardPanel {
       railMore: this.extension.globalState.get<boolean>(RAIL_MORE_KEY, false),
       columnLayouts: this.extension.globalState.get<Record<string, ColumnLayout>>(COLUMN_LAYOUTS_KEY, {}),
       dragToSelect: dragToSelect(),
-      tableSparklines: tableSparklines()
+      tableSparklines: tableSparklines(),
+      extension: extensionInfo(this.extension.extension)
     });
     // A webview reload loses its state but not the kubectl processes behind it,
     // so edits in flight have to be replayed or their buttons come back enabled.
@@ -2728,6 +2729,24 @@ function dragToSelect(): boolean {
 /** Whether the Nodes and Pods tables draw usage sparklines. Off unless turned on. */
 function tableSparklines(): boolean {
   return vscode.workspace.getConfiguration('kubi').get<boolean>('tableSparklines') ?? false;
+}
+
+/**
+ * What the About page's header says about Kubi itself: the version running and
+ * where to take a bug or a pull request. Read off package.json, so a release
+ * bump or a moved repository is one edit there rather than one here as well.
+ */
+function extensionInfo(extension: vscode.Extension<unknown>) {
+  const pkg = extension.packageJSON;
+  const repository = String(pkg.homepage ?? '').replace(/\/$/, '');
+  return {
+    version: String(pkg.version ?? ''),
+    description: String(pkg.description ?? ''),
+    repository,
+    issues: String(pkg.bugs?.url ?? `${repository}/issues`),
+    contributing: `${repository}/blob/main/CONTRIBUTING.md`,
+    changelog: `${repository}/blob/main/CHANGELOG.md`
+  };
 }
 
 /** Which editor group a new dashboard opens in, per `kubi.dashboardEditorGroup`. */

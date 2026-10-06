@@ -172,11 +172,13 @@ clipboard without displaying it. A value that is not UTF-8 shows as
 
 ### About
 
-The last item in the rail pairs your `kubectl` version against the cluster's and
-says whether the skew is inside Kubernetes' support policy, names the user and
-groups the API server authenticated you as — what your RBAC is really evaluated
-against, not the kubeconfig entry's name — and lists the context, cluster,
-default namespace and any `kubectl` plugins on your `PATH`.
+The last item in the rail opens with Kubi's own version and links to the GitHub
+repository, the contributing guide, the issue tracker and the changelog. Under
+that it pairs your `kubectl` version against the cluster's and says whether the
+skew is inside Kubernetes' support policy, names the user and groups the API
+server authenticated you as — what your RBAC is really evaluated against, not
+the kubeconfig entry's name — and lists the context, cluster, default namespace
+and any `kubectl` plugins on your `PATH`.
 
 ### Pods of a workload
 

@@ -2127,6 +2127,60 @@ body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackg
   max-width: 760px;
 }
 
+/*
+ * Kubi's own header, above the cards about the cluster. Not a card itself: it
+ * is the page's title, so it sits on the page with the tile drawn large beside
+ * it, the way an app's About box opens.
+ */
+.about-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 6px 2px 10px;
+}
+
+/* The tile's corners are part of the drawing, so it needs no radius of its own. */
+.about-logo { width: 88px; height: 88px; flex: none; }
+
+.about-intro {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.about-title { display: flex; align-items: baseline; gap: 10px; }
+.about-title h2 { margin: 0; font-size: 1.7em; font-weight: 600; letter-spacing: 0.01em; }
+
+/* The version is an identifier someone quotes in a bug report, so it is set like one. */
+.about-version {
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--vscode-badge-background, transparent);
+  color: var(--vscode-badge-foreground, inherit);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.85em;
+}
+
+.about-tagline { margin: 0; color: var(--muted); }
+.about-contribute { margin: 4px 0 0; font-size: 0.9em; line-height: 1.5; }
+
+.about-links { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.9em; }
+.about-link {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+}
+.about-link:hover,
+.about-link:focus-visible {
+  color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+  text-decoration: underline;
+}
+.about-link:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .about-card {
   border: 1px solid var(--border);
   border-radius: 8px;

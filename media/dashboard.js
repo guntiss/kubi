@@ -55,6 +55,13 @@
      */
     about: null,
     /**
+     * Kubi itself, for the About page's header: the version running and its
+     * GitHub links. Sent with `init`, so the header never waits on the cluster.
+     * @type {{version: string, description: string, repository: string,
+     *  issues: string, contributing: string, changelog: string} | null}
+     */
+    extension: null,
+    /**
      * The Overview's payload: the cluster's Warning events, the reasons they
      * group under, and how many events were seen in total. Null until Overview
      * has produced content at least once.
@@ -2633,15 +2640,21 @@
     );
   }
 
-  /** The About page's two cards, in their real proportions. */
+  /**
+   * The About page's two leading cards, in their real proportions, under the
+   * real header: that is Kubi's own, known from `init`, so it is drawn rather
+   * than stood in for. The skeleton class goes on the cards alone, since it
+   * switches off the pointer and the header's links must stay clickable.
+   */
   function renderAboutSkeleton() {
-    return el('div', { class: 'skeleton about', 'aria-busy': 'true', 'aria-label': 'Loading' },
-      el('div', { class: 'about-card' },
+    return el('div', { class: 'about' },
+      renderAboutHeader(),
+      el('div', { class: 'about-card skeleton', 'aria-busy': 'true', 'aria-label': 'Loading' },
         el('h3', {}, bar('42%')),
         el('div', { class: 'sk-bar sk-line' }),
         el('div', { class: 'sk-bar sk-line', style: 'width: 76%' })
       ),
-      el('div', { class: 'about-card' },
+      el('div', { class: 'about-card skeleton', 'aria-busy': 'true', 'aria-label': 'Loading' },
         el('h3', {}, bar('30%')),
         el('div', { class: 'sk-bar sk-line', style: 'width: 64%' }),
         el('div', { class: 'sk-bar sk-line', style: 'width: 48%' })
@@ -2890,8 +2903,73 @@
   }
 
   /**
-   * About: the versions on both ends of the connection, whether they are
-   * compatible, and who the cluster thinks you are.
+   * The About page's header: Kubi itself, ahead of the cards about the
+   * cluster — its tile, the version running, and the way to GitHub for anyone
+   * who wants to report a bug or send a change.
+   *
+   * The links are plain anchors: VS Code opens a link clicked in a webview in
+   * the browser, so they need no message to the extension.
+   */
+  function renderAboutHeader() {
+    const info = state.extension || {};
+    const link = (href, text) => el('a', { class: 'about-link', href, title: href }, text);
+    return el('div', { class: 'about-header' },
+      brandTile(),
+      el('div', { class: 'about-intro' },
+        el('div', { class: 'about-title' },
+          el('h2', { text: 'Kubi' }),
+          info.version
+            ? el('span', { class: 'about-version', title: 'Installed version', text: 'v' + info.version })
+            : null
+        ),
+        info.description ? el('p', { class: 'about-tagline', text: info.description }) : null,
+        info.repository
+          ? el('p', { class: 'about-contribute', text: 'Kubi is open source. Bug reports, ideas and pull requests are welcome on GitHub.' })
+          : null,
+        info.repository
+          ? el('div', { class: 'about-links' },
+              link(info.repository, 'GitHub'),
+              link(info.contributing, 'Contributing guide'),
+              link(info.issues, 'Report an issue'),
+              link(info.changelog, 'Changelog')
+            )
+          : null
+      )
+    );
+  }
+
+  /**
+   * The marketplace tile — the mark in white and green on its blue square — as
+   * media/icon.svg draws it, for the About page's header. Unlike the rail's
+   * mark it keeps its own colours: there it is a glyph among glyphs, here it
+   * is the extension's face, and the tile brings its own background, so it
+   * reads the same on any theme.
+   */
+  function brandTile() {
+    const tile = svg('svg', { class: 'about-logo', viewBox: '0 0 128 128', 'aria-hidden': 'true' });
+    const gradient = svg('linearGradient', { id: 'kubi-tile', x1: '0', y1: '0', x2: '1', y2: '1' });
+    gradient.append(
+      svg('stop', { offset: '0', 'stop-color': '#4C8DFF' }),
+      svg('stop', { offset: '1', 'stop-color': '#1F3FA8' })
+    );
+    const defs = svg('defs', {});
+    defs.appendChild(gradient);
+    tile.append(
+      defs,
+      svg('rect', { width: '128', height: '128', rx: '24', fill: 'url(#kubi-tile)' }),
+      svg('path', {
+        d: 'M64 18 103 40.5v45L64 108 25 85.5v-45L64 18Z',
+        fill: 'none', stroke: '#FFFFFF', 'stroke-width': '7', 'stroke-linejoin': 'round', opacity: '.45'
+      }),
+      svg('path', { d: 'M72 34 44 72h17l-6 24 30-40H67l5-22Z', fill: '#5BE49B' })
+    );
+    return tile;
+  }
+
+  /**
+   * About: Kubi's own header, then the versions on both ends of the
+   * connection, whether they are compatible, and who the cluster thinks you
+   * are.
    */
   function renderAbout() {
     const about = state.about;
@@ -2904,9 +2982,9 @@
     const server = about.server || {};
     const verdict = about.skew || { health: 'muted', label: 'Unknown', detail: '' };
 
-    // The verdict leads: it is the question the page answers. The two versions
-    // sit under it as the evidence, rather than making the reader compare
-    // version strings themselves.
+    // The verdict leads the cluster's cards: it is the question they answer.
+    // The two versions sit under it as the evidence, rather than making the
+    // reader compare version strings themselves.
     const compat = el('div', { class: 'about-card compat ' + verdict.health },
       el('div', { class: 'compat-head' },
         el('span', { class: 'pill ' + verdict.health }, verdict.label),
@@ -3060,7 +3138,7 @@
       )
     );
 
-    return el('div', { class: 'about' }, compat, identity, connection, plugins, build, cache);
+    return el('div', { class: 'about' }, renderAboutHeader(), compat, identity, connection, plugins, build, cache);
   }
 
   /** A cache size is read as a magnitude, so it never shows more than one decimal. */
@@ -7513,6 +7591,7 @@
         state.columnLayouts = message.columnLayouts || {};
         state.dragToSelect = Boolean(message.dragToSelect);
         state.tableSparklines = Boolean(message.tableSparklines);
+        state.extension = message.extension || null;
         render();
         break;
       case 'railKinds':
