@@ -4,6 +4,25 @@ All notable changes to Kubi are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] — 2026-10-06
+
+### Added
+
+- Add a Logs tab to the detail drawer that streams a container's log, with a container picker, filter, and Follow, Wrap, Timestamps and Previous toggles.
+- Add foldable rail sections and a Go to box, and split Policy out of Config.
+- Add type-to-filter to the namespace picker.
+
+### Changed
+
+- Highlight the log line under the pointer and mark filter matches in the Logs tab.
+- Show log lines that are JSON indented and coloured, with a JSON toggle that is on by default.
+- Show log timestamps by default and leave long log lines unwrapped.
+- Show log timestamps as local time of day, with the full date and time on hover.
+- Make table columns resizable, movable and hideable, and compact the table views.
+- Show a progress bar across the top of the page while data older than 10s is being refreshed.
+- Put Workloads above Cluster in the rail, so Pods sits right under Overview.
+- Rename kubi.dashboardLocation to kubi.dashboardEditorGroup, opening dashboards in the active editor group by default.
+
 ## [1.0.6] — 2026-09-29
 
 ### Added
