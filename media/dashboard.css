@@ -94,13 +94,18 @@ button { user-select: none; }
  * Expanded this is a button covering the rail's whole top bar, so collapsing
  * is a large target rather than a chevron-sized one. It has to shed the
  * default button chrome to keep reading as a brand row.
+ *
+ * Inset from the rail's top edge and from Go to by a margin rather than all
+ * padding, so its hover background stops short of both instead of running
+ * into the frame. The mark sits where the padding alone used to put it.
  */
 .brand {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 16px 10px 12px;
+  margin: 6px 0;
+  padding: 10px 10px 6px;
   font-weight: 600;
   font-size: 1.05em;
   letter-spacing: 0.02em;
@@ -2030,7 +2035,7 @@ body.rail-collapsed button.rail-jump:focus-visible { outline: 1px solid var(--vs
  */
 body.rail-collapsed .brand {
   justify-content: center;
-  padding: 14px 0 12px;
+  padding: 8px 0 6px;
 }
 /* A slightly larger mark, now that it is the only thing in the row. */
 body.rail-collapsed .brand .mark { width: 20px; height: 20px; }
