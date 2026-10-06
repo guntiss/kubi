@@ -5661,7 +5661,7 @@
    * How logs are read rather than which log is showing, so these outlive the
    * row: set once, they hold for every drawer until the dashboard is closed.
    */
-  const logPrefs = { wrap: false, timestamps: true };
+  const logPrefs = { wrap: false, timestamps: true, json: true };
 
   /**
    * The Logs tab of the object in the drawer, or null while there is none.
@@ -5677,6 +5677,13 @@
 
   /** Each line element's text, lowercased for the filter, without its timestamp or colour codes. */
   const logLineText = new WeakMap();
+
+  /**
+   * The message of each line that is JSON, as it arrived, so the JSON toggle
+   * can redraw it either way. Other lines draw the same in both modes and are
+   * not kept.
+   */
+  const logJsonLines = new WeakMap();
 
   /** kubectl's `--timestamps` prefix: RFC 3339 to the nanosecond, then a space. */
   const LOG_TIMESTAMP = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(\.\d+)?(Z|[+-]\d\d:\d\d) /;
@@ -5794,6 +5801,12 @@
         syncLogView();
         settleLogScroll();
       }),
+      json: toggle('JSON', 'Show lines that are JSON indented and coloured', () => {
+        logPrefs.json = !logPrefs.json;
+        redrawJsonLines();
+        syncLogView();
+        settleLogScroll();
+      }),
       previous: toggle('Previous', '', () => {
         view.previous = !view.previous;
         startLogStream();
@@ -5826,7 +5839,8 @@
       el('div', { class: 'logs-toolbar' },
         el('div', { class: 'logs-row' }, view.select, view.filterInput),
         el('div', { class: 'logs-row' },
-          view.toggles.follow, view.toggles.wrap, view.toggles.timestamps, view.toggles.previous,
+          view.toggles.follow, view.toggles.wrap, view.toggles.timestamps, view.toggles.json,
+          view.toggles.previous,
           el('span', { class: 'spacer' }),
           view.status,
           view.reconnect
@@ -5900,7 +5914,8 @@
     if (!view) return;
     view.root.className = 'logs-pane'
       + (logPrefs.wrap ? ' wrap' : '')
-      + (logPrefs.timestamps ? ' show-ts' : '');
+      + (logPrefs.timestamps ? ' show-ts' : '')
+      + (logPrefs.json ? ' pretty' : '');
 
     // Rebuilt only when the set changes — an ephemeral container added, say —
     // since replacing the options of an open picker would close it.
@@ -5922,6 +5937,7 @@
     press(view.toggles.follow, view.follow);
     press(view.toggles.wrap, logPrefs.wrap);
     press(view.toggles.timestamps, logPrefs.timestamps);
+    press(view.toggles.json, logPrefs.json);
     press(view.toggles.previous, view.previous);
     // Previous is absent from the terminal buttons until a restart; here it
     // stays put and is greyed instead, so the toolbar keeps its shape.
@@ -6024,19 +6040,139 @@
 
   /**
    * One line of log: its timestamp split off into a span the Timestamps
-   * toggle shows or hides, and its colour codes drawn rather than printed.
+   * toggle shows or hides, and its colour codes drawn rather than printed. A
+   * line that is JSON is laid out indented while the JSON toggle is on.
    */
   function logLine(raw) {
     const text = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     const stamp = LOG_TIMESTAMP.exec(text);
     const segments = ansiSegments(stamp ? text.slice(stamp[0].length) : text);
+    const plain = segments.map((segment) => segment.text).join('');
+    const tokens = prettyJson(plain);
     const time = stamp ? logTime(stamp) : null;
-    const node = el('div', { class: 'log-line' },
+    const node = el('div', { class: tokens ? 'log-line json' : 'log-line' },
       time ? el('span', { class: 'log-ts', title: time.full, text: `${time.short} ` }) : null,
-      ...segments.map(ansiNode)
+      tokens ? logMessage(segments, tokens) : segments.map(ansiNode)
     );
-    logLineText.set(node, segments.map((segment) => segment.text).join('').toLowerCase());
+    // A JSON line matches the filter as it arrived and as it is laid out, so
+    // `"level": "error"` finds it as readily as `"level":"error"`.
+    const pretty = tokens ? `\n${tokens.map(([token]) => token).join('')}` : '';
+    logLineText.set(node, (plain + pretty).toLowerCase());
+    if (tokens) logJsonLines.set(node, segments);
     return node;
+  }
+
+  /** A JSON line's message, laid out or as it came, by the JSON toggle. */
+  function logMessage(segments, tokens) {
+    return el('span', { class: 'log-msg' }, ...(logPrefs.json
+      ? jsonNodes(tokens || prettyJson(segments.map((segment) => segment.text).join('')))
+      : segments.map(ansiNode)));
+  }
+
+  /** Redraws every JSON line for the JSON toggle; nothing else changes shape. */
+  function redrawJsonLines() {
+    if (!logView) return;
+    for (const node of logView.lines.children) {
+      const segments = logJsonLines.get(node);
+      if (segments) node.lastChild.replaceWith(logMessage(segments));
+    }
+  }
+
+  /**
+   * A line that is a JSON object or array, as the tokens of its indented form
+   * and the class each is coloured by; null for anything else. A bare string
+   * or number is valid JSON too, but there is nothing to lay out.
+   *
+   * The layout is built from the line's own tokens rather than from
+   * `JSON.stringify` of the parsed value, which would round numbers past 2^53 —
+   * 64-bit ids are common in logs — and move numeric keys to the front. Parsing
+   * is only the check that the line is JSON at all.
+   */
+  function prettyJson(text) {
+    const trimmed = text.trim();
+    const open = trimmed[0];
+    if (!(open === '{' && trimmed.endsWith('}')) && !(open === '[' && trimmed.endsWith(']'))) return null;
+    try {
+      JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+    const tokens = jsonScan(trimmed);
+    const out = [];
+    let depth = 0;
+    const newline = () => out.push([`\n${'  '.repeat(depth)}`, '']);
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (token === '{' || token === '[') {
+        const close = token === '{' ? '}' : ']';
+        // An empty object or array stays on one line.
+        if (tokens[i + 1] === close) {
+          out.push([token + close, '']);
+          i++;
+          continue;
+        }
+        out.push([token, '']);
+        depth++;
+        newline();
+      } else if (token === '}' || token === ']') {
+        depth--;
+        newline();
+        out.push([token, '']);
+      } else if (token === ',') {
+        out.push([',', '']);
+        newline();
+      } else if (token === ':') {
+        out.push([': ', '']);
+      } else if (token[0] === '"') {
+        out.push([token, tokens[i + 1] === ':' ? 'j-key' : 'j-str']);
+      } else {
+        out.push([token, token === 'null' ? 'j-null' : token === 'true' || token === 'false' ? 'j-bool' : 'j-num']);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Splits text already known to be JSON into its tokens: punctuation, strings
+   * with their quotes and escapes intact, and bare literals. Whitespace between
+   * tokens is dropped; `prettyJson` puts its own back.
+   */
+  function jsonScan(text) {
+    const tokens = [];
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (c === '"') {
+        let end = i + 1;
+        while (text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
+        tokens.push(text.slice(i, end + 1));
+        i = end;
+      } else if ('{}[],:'.includes(c)) {
+        tokens.push(c);
+      } else if (!/\s/.test(c)) {
+        let end = i;
+        while (end < text.length && !/[\s{}[\],:]/.test(text[end])) end++;
+        tokens.push(text.slice(i, end));
+        i = end - 1;
+      }
+    }
+    return tokens;
+  }
+
+  /** Tokens as nodes: a span for each coloured one, and the punctuation between them as plain text. */
+  function jsonNodes(tokens) {
+    const nodes = [];
+    let plain = '';
+    for (const [text, cls] of tokens) {
+      if (!cls) {
+        plain += text;
+        continue;
+      }
+      if (plain) nodes.push(document.createTextNode(plain));
+      plain = '';
+      nodes.push(el('span', { class: cls, text }));
+    }
+    if (plain) nodes.push(document.createTextNode(plain));
+    return nodes;
   }
 
   /**
