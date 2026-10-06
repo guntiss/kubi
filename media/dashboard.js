@@ -683,6 +683,7 @@
     }
     const rail = app.querySelector('.rail-scroll');
     if (rail) rail.scrollTop = railScroll;
+    chargeBrand();
     restoreDetailScroll(detail);
     settleLogScroll();
     restoreSearchFocus(caret);
@@ -1324,10 +1325,53 @@
       const scroller = next.querySelector('.rail-scroll');
       if (scroller) scroller.scrollTop = scroll;
       syncKindMenu();
+      chargeBrand();
     } else {
       render();
     }
   }
+
+  /**
+   * The pointer's visit to the brand row, which plays the mark's animation
+   * once (see `.brand.charged` in the CSS). Left to `:hover`, it replayed
+   * every few seconds while the pointer sat still: a refresh rebuilds the
+   * rail, and each rebuild is a fresh element under the pointer, starting the
+   * animation over. So the visit is kept here instead, where rebuilds cannot
+   * reach it, and a rebuilt row picks the animation up where the visit has
+   * got to — mid-turn, or settled.
+   */
+  const brandVisit = { on: false, since: 0 };
+
+  /** Puts the brand row on screen in step with the visit, if there is one. */
+  function chargeBrand() {
+    const brand = app.querySelector('.rail .brand');
+    if (!brand) return;
+    brand.classList.toggle('charged', brandVisit.on);
+    if (!brandVisit.on) return;
+    const elapsed = performance.now() - brandVisit.since;
+    for (const animation of brand.getAnimations({ subtree: true })) animation.currentTime = elapsed;
+  }
+
+  function setBrandVisit(on) {
+    if (on === brandVisit.on) return;
+    brandVisit.on = on;
+    brandVisit.since = performance.now();
+    chargeBrand();
+  }
+
+  // On the document, so they outlive the rail. Each time the pointer crosses
+  // into something, what lies under it says whether it is on the brand. Under
+  // it, not the event's target: when a rebuild takes the row away, the browser
+  // first reports the pointer over what held it — #app — and only then over
+  // the new row, and trusting that would end the visit and replay it.
+  // Leaving the panel crosses into nothing.
+  document.addEventListener('pointerover', (e) => {
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    setBrandVisit(Boolean(under && under.closest('.brand')));
+  });
+  document.addEventListener('pointerout', (e) => {
+    if (!e.relatedTarget) setBrandVisit(false);
+  });
 
   function glyph(id) {
     return GLYPHS[id] || '•';
