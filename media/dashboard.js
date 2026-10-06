@@ -1884,14 +1884,14 @@
 
     children.push(renderFreshness());
     if (filters) children.push(renderColumnsButton());
-    children.push(renderRefresh());
+    if (SHOW_REFRESH_BUTTON) children.push(renderRefresh());
     return el('div', { class: 'toolbar' }, ...children);
   }
 
   /**
-   * Whether the toolbar offers a Refresh button. Hidden for now: Ctrl/Cmd+R
-   * does the same, and the button's square is kept for the spinner, so turning
-   * it back on is this flag alone.
+   * Whether the toolbar offers a Refresh button. Hidden for now, along with the
+   * spinner that takes its square during a fetch: Ctrl/Cmd+R does the same, and
+   * the load bar answers it. Turning the pair back on is this flag alone.
    */
   const SHOW_REFRESH_BUTTON = false;
 
@@ -1916,7 +1916,6 @@
         el('span', { class: 'spinner' })
       );
     }
-    if (!SHOW_REFRESH_BUTTON) return el('span', { class: 'refresh-slot', 'aria-hidden': 'true' });
     return el('button', {
       class: 'refresh-slot refresh',
       onclick: reload,
