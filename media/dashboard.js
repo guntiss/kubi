@@ -5273,17 +5273,18 @@
   }
 
   /**
-   * The controller above a pod's owner that its row cannot name, keyed by the
-   * owner's Kind: the Deployment over a ReplicaSet, the CronJob over a Job.
-   * The extension reads the owner to find it, so the item is offered on how
-   * likely it is to be there. Nearly every ReplicaSet is a Deployment's. Most
-   * Jobs are not a CronJob's, so a Job counts only when it carries the name a
-   * CronJob gives its jobs — its scheduled time in minutes — or the one Kubi's
-   * Trigger now does.
+   * The controller above a pod's owner, keyed by the owner's Kind, its name
+   * read off the owner's. A Deployment names its ReplicaSets
+   * `<deployment>-<pod-template-hash>`, and a CronJob its Jobs
+   * `<cronjob>-<scheduled minute>`, or `<cronjob>-manual-<seconds>` when
+   * Kubi's Trigger now made one. Read from the owner rather than from the
+   * pod's own name, which is the ReplicaSet's plus one more part but is cut
+   * short once it runs past 58 characters. A Job named neither way — most
+   * are not a CronJob's — offers nothing.
    */
   const OWNER_ABOVE = {
-    ReplicaSet: { kind: 'Deployment', likely: () => true },
-    Job: { kind: 'CronJob', likely: (name) => /-\d{8,}$|-manual-\d+$/.test(name) }
+    ReplicaSet: { kind: 'deployments', name: (set) => /^(.+)-[^-]+$/.exec(set)?.[1] },
+    Job: { kind: 'cronjobs', name: (job) => /^(.+?)(?:-manual)?-\d{8,}$/.exec(job)?.[1] }
   };
 
   /** The kind Kubi lists an API Kind under, if any: 'StatefulSet' -> the statefulsets kind. */
@@ -5322,16 +5323,8 @@
       // Outermost first: a pod is usually thought of as its Deployment's, and
       // the ReplicaSet in between is the detail.
       const above = kind.id === 'pods' && OWNER_ABOVE[row.owner.kind];
-      if (above && above.likely(row.owner.name)) {
-        items.push({
-          label: above.kind,
-          title: `Open the ${above.kind} that owns ${row.owner.kind} ${row.owner.name}`,
-          run: () => {
-            pendingOrigin = from;
-            post({ type: 'goToOwner', kind: owner.id, name: row.owner.name, namespace: row.namespace, owner: above.kind });
-          }
-        });
-      }
+      const name = above && above.name(row.owner.name);
+      if (name) jump({ kind: above.kind, name, namespace: row.namespace });
       jump({ kind: owner.id, name: row.owner.name, namespace: owner.namespaced ? row.namespace : undefined });
     }
     for (const link of row.links || []) jump(link);
@@ -7006,11 +6999,6 @@
           post({ type: 'setNamespace', namespace: state.namespace });
         }
         render();
-        break;
-      case 'goTo':
-        // A controller further up than the row could name — a pod's
-        // Deployment — found by the extension; see `goToOwner` there.
-        goTo({ kind: message.kind, name: message.name, namespace: message.namespace });
         break;
       case 'scope':
         // Which owners count, resolved by the extension. A resolve that failed

@@ -137,13 +137,6 @@ type Inbound =
    * while the deployments table is open.
    */
   | { type: 'showOwned'; kind: string; name: string; namespace?: string }
-  /**
-   * Go to the controller one hop above an object's owner: a pod's Deployment,
-   * through the ReplicaSet its row names. Resolved here for the same reason as
-   * `showOwned` — the webview holds no ReplicaSet rows while it shows pods.
-   * `owner` is the API Kind wanted, and `kind`/`name` the hop in between.
-   */
-  | { type: 'goToOwner'; kind: string; name: string; namespace?: string; owner: string }
   /** A Go to landed on a table without the object in it; said here, where toasts live. */
   | { type: 'goToMissing'; kind: string; name: string; namespace?: string }
   /**
@@ -727,9 +720,6 @@ export class DashboardPanel {
       case 'showOwned':
         await this.showOwned(message);
         break;
-      case 'goToOwner':
-        await this.goToOwner(message);
-        break;
       case 'goToMissing': {
         const label = message.namespace ? `${message.namespace}/${message.name}` : message.name;
         vscode.window.showInformationMessage(
@@ -902,34 +892,6 @@ export class DashboardPanel {
       kind: 'pods',
       scope: { ...target, owners: resolved.owners, selector: resolved.selector }
     });
-  }
-
-  /**
-   * Opens the controller that owns `target`, when it is a `target.owner`: the
-   * Deployment above a ReplicaSet, the CronJob above a Job. A pod's row names
-   * only the hop in between, so the webview hands that over and the rest of
-   * the chain is read here, one object, at the moment it is asked for.
-   */
-  private async goToOwner(
-    target: { kind: string; name: string; namespace?: string; owner: string }
-  ): Promise<void> {
-    const label = `${kindById(target.kind)?.singular ?? target.kind} ${target.name}`;
-    let object: k.KubeObject;
-    try {
-      object = await k.getObject(target.kind, target.name, this.contextName, target.namespace);
-    } catch (err) {
-      vscode.window.showErrorMessage(`Kubi: could not read ${label}: ${describeError(err)}`);
-      return;
-    }
-    const ref = (object.metadata.ownerReferences ?? []).find((r) => r.kind === target.owner && r.name);
-    const kind = KINDS.find((entry) => entry.singular === target.owner);
-    // A bare ReplicaSet, or a Job someone created by hand, has no controller
-    // above it. Saying so beats landing on a table with nothing picked out.
-    if (!ref?.name || !kind) {
-      vscode.window.showInformationMessage(`Kubi: ${label} is not owned by a ${target.owner}`);
-      return;
-    }
-    this.post({ type: 'goTo', kind: kind.id, name: ref.name, namespace: target.namespace });
   }
 
   /**
