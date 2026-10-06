@@ -374,12 +374,12 @@ export class DashboardPanel {
     metrics.seed('pods', this.cache.get(this.cacheKey('pods'))?.payload);
     this.disposables.push(metrics.retain());
     this.panel.webview.onDidReceiveMessage((m: Inbound) => this.onMessage(m), null, this.disposables);
-    // Polling pauses while the panel is unfocused, so coming back to it would
+    // Polling pauses while the panel is out of sight, so coming back to it would
     // otherwise show rows as old as the time spent away until the next tick.
-    // Refreshing on focus makes that wait the one case it isn't: returning to
-    // the dashboard is exactly when the data is being looked at. It also
-    // restarts the countdown, so a tick already due cannot land on top of the
-    // rows this just fetched.
+    // Refreshing on the way back makes that wait the one case it isn't:
+    // returning to the dashboard is exactly when the data is being looked at.
+    // It also restarts the countdown, so a tick already due cannot land on top
+    // of the rows this just fetched.
     this.panel.onDidChangeViewState(() => {
       // Clicking the context in the sidebar goes back to the dashboard used last.
       if (this.panel.active) {
@@ -387,7 +387,7 @@ export class DashboardPanel {
       }
       this.onFocusRefresh();
     }, null, this.disposables);
-    // A panel stays `active` while the whole window sits in the background, so
+    // A panel stays `visible` while the whole window sits in the background, so
     // without this the dashboard polls on behind another app. Window focus is
     // the other half of `isAttended`, and it changes without any view-state
     // event, so it needs its own subscription into the same resume path.
@@ -515,15 +515,20 @@ export class DashboardPanel {
   /**
    * Whether anyone is actually looking at this panel.
    *
-   * Two conditions, because either one alone leaks polling. `panel.active` is
-   * scoped to the window: it says the dashboard is the focused tab of its
+   * Two conditions, because either one alone leaks polling. `panel.visible` is
+   * scoped to the window: it says the dashboard is the tab in front of its
    * editor group, and stays true while that whole window sits behind another
    * app. `window.state.focused` says VS Code has the OS focus, but says
    * nothing about which tab is in front. A dashboard is being read only when
    * both hold.
+   *
+   * `visible` rather than `active`, which also requires keyboard focus: a
+   * dashboard kept open in a second group beside the code being edited is on
+   * screen and being watched, and it went stale the moment the cursor moved to
+   * the other group.
    */
   private isAttended(): boolean {
-    return this.panel.active && vscode.window.state.focused;
+    return this.panel.visible && vscode.window.state.focused;
   }
 
   /** Records a completed sync and restarts the countdown from it. */
@@ -541,11 +546,11 @@ export class DashboardPanel {
   /**
    * One unattended refresh, skipped unless the panel is worth refreshing.
    *
-   * `isAttended` rather than `visible`: a panel in a split, behind another
-   * tab, or in a window that has been alt-tabbed away from stays visible while
-   * nobody is reading it, and polling every open cluster in the background is
-   * how a dozen dashboards quietly become a dozen kubectl invocations every
-   * few seconds.
+   * `isAttended` rather than `visible` alone: a panel in a window that has
+   * been alt-tabbed away from stays visible while nobody is reading it, and
+   * polling every open cluster in the background is how a dozen dashboards
+   * quietly become a dozen kubectl invocations every few seconds. A panel
+   * behind another tab is not visible, so it is skipped either way.
    *
    * The overlap guard itself lives in `load`, which every path goes through.
    * A tick arriving while anything is still fetching is simply dropped: the
@@ -562,8 +567,8 @@ export class DashboardPanel {
   private autoRefresh(): void {
     if (!this.isAttended() || this.inFlight) {
       // Still a tick: re-arm so polling survives the skip. A panel that is
-      // merely unfocused keeps its timer running, and the focus handler
-      // refreshes on the way back in.
+      // hidden or in an unfocused window keeps its timer running, and the
+      // view-state and window-state handlers refresh on the way back in.
       this.armAutoRefresh();
       return;
     }
