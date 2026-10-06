@@ -178,8 +178,8 @@ export interface Owner {
 export type KindGroup = 'cluster' | 'workloads' | 'network' | 'config' | 'storage' | 'policy' | 'access';
 
 export const GROUPS: { id: KindGroup; label: string; open: boolean }[] = [
-  { id: 'cluster', label: 'Cluster', open: true },
   { id: 'workloads', label: 'Workloads', open: true },
+  { id: 'cluster', label: 'Cluster', open: true },
   { id: 'network', label: 'Network', open: false },
   { id: 'config', label: 'Config', open: false },
   { id: 'storage', label: 'Storage', open: false },

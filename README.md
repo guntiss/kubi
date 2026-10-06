@@ -61,13 +61,13 @@ hand to a coding agent with the whole thing in view.
 
 - **Resource tables** — sortable, filterable tables with columns matched to each
   kind, and status pills colored by health. The rail groups them into sections
-  that fold away; only Cluster and Workloads start open, and the rail remembers
+  that fold away; only Workloads and Cluster start open, and the rail remembers
   what you open or fold:
 
   | Group | Kinds |
   | --- | --- |
-  | Cluster | Nodes, Events, Namespaces |
   | Workloads | Pods, Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs, Autoscalers |
+  | Cluster | Nodes, Events, Namespaces |
   | Network | Services, Ingresses, Endpoints, Network policies, Ingress classes |
   | Config | ConfigMaps, Secrets |
   | Storage | Volume claims, Volumes, Storage classes |
