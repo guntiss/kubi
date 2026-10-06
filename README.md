@@ -116,7 +116,8 @@ hand to a coding agent with the whole thing in view.
   that follows a container's log right in the drawer, starting from its last
   1,000 lines. Pick the container from the dropdown (it opens on the one
   `kubectl` would pick), filter the lines, and toggle Follow, Wrap, Timestamps
-  and Previous; colour codes are drawn as in the terminal. A workload's log comes
+  and Previous; colour codes are drawn as in the terminal. Timestamps show the
+  time of day in your computer's timezone; hover one for the full date and time. A workload's log comes
   from one of its pods, as `kubectl logs deployment/…` picks it. The **Logs**
   buttons still open a terminal.
 

@@ -6030,18 +6030,32 @@
     const text = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     const stamp = LOG_TIMESTAMP.exec(text);
     const segments = ansiSegments(stamp ? text.slice(stamp[0].length) : text);
+    const time = stamp ? logTime(stamp) : null;
     const node = el('div', { class: 'log-line' },
-      // Cut to the millisecond: nine digits of fraction are noise to a reader,
-      // and the full value is in the tooltip.
-      stamp ? el('span', {
-        class: 'log-ts',
-        title: stamp[0].trim(),
-        text: `${stamp[1]}${(stamp[2] || '').slice(0, 4)}${stamp[3]} `
-      }) : null,
+      time ? el('span', { class: 'log-ts', title: time.full, text: `${time.short} ` }) : null,
       ...segments.map(ansiNode)
     );
     logLineText.set(node, segments.map((segment) => segment.text).join('').toLowerCase());
     return node;
+  }
+
+  /**
+   * A line's timestamp in this computer's timezone. On the line, only the time
+   * of day: a log is read over minutes or hours, so the date would repeat on
+   * every line. The tooltip has the whole moment — date, every digit of the
+   * fraction kubectl sent, and the offset it was converted to.
+   */
+  function logTime(stamp) {
+    const date = new Date(stamp[1] + stamp[3]);
+    if (Number.isNaN(date.getTime())) return { short: stamp[1].slice(11), full: stamp[0].trim() };
+    const pad = (n) => String(n).padStart(2, '0');
+    const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    const offset = -date.getTimezoneOffset();
+    const zone = `${offset < 0 ? '-' : '+'}${pad(Math.floor(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
+    return {
+      short: time,
+      full: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}${stamp[2] || ''} ${zone}`
+    };
   }
 
   /**
