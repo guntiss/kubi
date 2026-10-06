@@ -243,6 +243,9 @@ and `npm run package` then fails.
 
 ## Settings
 
+**Settings** at the bottom of the dashboard's sidebar opens these in VS Code's
+settings editor.
+
 | Setting | Default | Description |
 | --- | --- | --- |
 | `kubi.kubectlPath` | `kubectl` | Path to the kubectl binary. |

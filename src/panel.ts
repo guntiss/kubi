@@ -128,6 +128,8 @@ type Inbound =
   | { type: 'clearCache' }
   /** The "Preserve cache after updates" tick on the About page. */
   | { type: 'setPreserveCache'; preserve: boolean }
+  /** The rail's Settings item: VS Code's settings editor, narrowed to Kubi's. */
+  | { type: 'openSettings' }
   /**
    * "Show me the pods of this thing". The owner chain is resolved here rather
    * than in the webview because a Deployment does not own its pods directly —
@@ -706,6 +708,12 @@ export class DashboardPanel {
         await vscode.workspace
           .getConfiguration('kubi')
           .update('preserveCacheAfterUpdates', message.preserve, vscode.ConfigurationTarget.Global);
+        break;
+      case 'openSettings':
+        await vscode.commands.executeCommand(
+          'workbench.action.openSettings',
+          `@ext:${this.extension.extension.id}`
+        );
         break;
       case 'showOwned':
         await this.showOwned(message);

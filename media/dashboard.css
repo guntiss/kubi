@@ -271,6 +271,7 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
   border-left-color: var(--vscode-focusBorder);
 }
 .nav-item .glyph { width: 14px; text-align: center; flex: none; opacity: 0.85; }
+.nav-item .gear-mark { height: 14px; }
 
 /*
  * The label a collapsed glyph would otherwise hide, flown out on hover. It is

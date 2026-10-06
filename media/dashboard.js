@@ -754,16 +754,16 @@
     // Collapsed, the label is hidden, so hovering a glyph flies the same text
     // out beside the rail. A CSS flyout rather than the native tooltip: no
     // delay before it appears, and it matches the rail's styling.
-    const navItem = (id, label, glyphText) => el('div', {
+    const navItem = (id, label, glyph, onclick = () => select(id)) => el('div', {
       class: 'nav-item' + (state.active === id ? ' active' : ''),
-      onclick: () => select(id),
+      onclick,
       // The flyout is `position: fixed`, so it has to be told where its item
       // is. Placing it on enter rather than in CSS is what keeps it out of the
       // scroller's clip — see `placeFlyout`.
       onmouseenter: collapsed ? placeFlyout : null,
       onmouseleave: collapsed ? hideFlyout : null
     },
-      el('span', { class: 'glyph', text: glyphText }),
+      typeof glyph === 'string' ? el('span', { class: 'glyph', text: glyph }) : glyph,
       el('span', { class: 'label-text', text: label }),
       collapsed ? el('span', { class: 'flyout' }, label) : null
     );
@@ -822,9 +822,13 @@
       el('div', { class: 'rail-scroll' },
         ...items,
         // About is not a resource, so it is pushed to the bottom and separated
-        // rather than sitting in the list of kinds.
+        // rather than sitting in the list of kinds. Settings sits with it, but
+        // is not a page: it opens VS Code's own settings, narrowed to Kubi's.
         el('div', { class: 'rail-spacer' }),
-        el('div', { class: 'rail-footer' }, navItem('about', 'About', 'ⓘ'))
+        el('div', { class: 'rail-footer' },
+          navItem('about', 'About', 'ⓘ'),
+          navItem('settings', 'Settings', gearMark(), () => post({ type: 'openSettings' }))
+        )
       )
     );
   }
@@ -914,6 +918,46 @@
         collapsed ? el('span', { class: 'flyout' }, 'Go to…', el('kbd', { text: ':' })) : null
       )
     );
+  }
+
+  /**
+   * A gear for the rail's Settings item, drawn for the reason the refresh mark
+   * is: `⚙` comes out at whatever size the theme's font gives it, which beside
+   * About's `ⓘ` was a speck.
+   */
+  function gearMark() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'glyph gear-mark');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    // A ring and a hub at the weight the magnifier and refresh arrow use, and
+    // eight square-ended teeth on the ring. Teeth any thinner than the ring
+    // read as rays, and the gear as a sun.
+    const ring = document.createElementNS(ns, 'circle');
+    ring.setAttribute('cx', '8');
+    ring.setAttribute('cy', '8');
+    ring.setAttribute('r', '4.3');
+    const hub = document.createElementNS(ns, 'circle');
+    hub.setAttribute('cx', '8');
+    hub.setAttribute('cy', '8');
+    hub.setAttribute('r', '1.7');
+    const teeth = document.createElementNS(ns, 'path');
+    let d = '';
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI) / 4;
+      const x = (r) => (8 + r * Math.cos(a)).toFixed(2);
+      const y = (r) => (8 + r * Math.sin(a)).toFixed(2);
+      d += `M${x(4.6)} ${y(4.6)}L${x(6.5)} ${y(6.5)}`;
+    }
+    teeth.setAttribute('d', d);
+    for (const node of [ring, hub, teeth]) {
+      node.setAttribute('fill', 'none');
+      node.setAttribute('stroke', 'currentColor');
+      node.setAttribute('stroke-width', node === teeth ? '2.3' : '1.6');
+      svg.appendChild(node);
+    }
+    return svg;
   }
 
   /** A magnifier, drawn the way the refresh mark is so it takes the theme's colour. */
