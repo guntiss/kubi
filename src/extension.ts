@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as k from './kubectl';
 import { DashboardPanel } from './panel';
 import { ContextTreeProvider, TreeNode, isContextNode } from './tree';
+import { watchForUpdate } from './update';
 
 export function activate(context: vscode.ExtensionContext): void {
   const tree = new ContextTreeProvider();
@@ -28,6 +29,8 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(vscode.commands.registerCommand(id, handler));
 
   register('kubi.refreshContexts', () => tree.refresh());
+
+  context.subscriptions.push(watchForUpdate(context));
 
   // Pointing the extension at a different kubeconfig changes which contexts
   // exist, so the sidebar has to be re-read; left alone it would go on listing

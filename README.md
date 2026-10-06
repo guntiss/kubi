@@ -260,6 +260,10 @@ code --install-extension kubi.vsix
 Then open the **Kubi** icon in the activity bar, or run **Kubi: Open Dashboard**
 from the command palette.
 
+VS Code keeps running the old version after an update until the window
+reloads, so when a newer Kubi is installed Kubi offers **Reload Window**. Open
+dashboards come back after the reload on the page they were showing.
+
 ## Building from source
 
 ```

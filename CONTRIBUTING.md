@@ -36,6 +36,7 @@ code --install-extension kubi-<version>.vsix
 | `src/panel.ts` | The dashboard webview host — message handling, loading, caching. |
 | `src/tree.ts` | The contexts sidebar. |
 | `src/cache.ts` | The per-context payload cache that lets a reopened page paint instantly. |
+| `src/update.ts` | Notices a newer installed version and offers to reload the window. |
 | `media/dashboard.js` | The webview front end. Plain DOM, no framework, no build step. |
 | `media/dashboard.css` | Dashboard styling, themed off VS Code's CSS variables. |
 | `media/icon.svg` | Source for the marketplace tile. |
