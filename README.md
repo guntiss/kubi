@@ -149,6 +149,10 @@ together.
 Every table has a filter row: a namespace picker, a status picker, and a query
 box. They combine, and `✕ Clear` resets all three, plus the pod scope.
 
+The namespace picker filters as you type: open it, or just start typing while
+it has focus, then pick with the arrow keys and `Enter`. Names starting with
+what you typed are listed first.
+
 The status picker is built from the rows on screen, so it only offers what this
 cluster reports, with a count beside each. It groups health buckets —
 **Problems**, **Failing**, **Warning / pending**, **Healthy**, **Inactive** —

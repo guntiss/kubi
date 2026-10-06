@@ -327,7 +327,7 @@ button.brand:hover .mark { color: var(--vscode-foreground); }
   .spinner { animation-duration: 2s; }
 }
 
-input.search, select {
+input.search, input.ns-filter, select {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, var(--border));
@@ -338,7 +338,7 @@ input.search, select {
   outline: none;
 }
 input.search { width: 240px; }
-input.search:focus, select:focus { border-color: var(--vscode-focusBorder); }
+input.search:focus, input.ns-filter:focus, select:focus { border-color: var(--vscode-focusBorder); }
 
 /* The query box takes whatever the pickers leave, down to a usable minimum. */
 .filters input.search { flex: 1; width: auto; min-width: 200px; }
@@ -423,8 +423,106 @@ input.search:focus, select:focus { border-color: var(--vscode-focusBorder); }
 }
 
 /* Capped so a long namespace or status word can't crowd the row. */
-select.ns-picker { max-width: 200px; }
+button.ns-picker { max-width: 200px; }
 select.status-picker { max-width: 230px; }
+
+/*
+ * The namespace picker is a button that opens a filterable list, dressed as
+ * the status select beside it so the row reads as two of a kind.
+ */
+button.ns-picker {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--border));
+  text-align: left;
+}
+button.ns-picker:hover { background: var(--vscode-input-background); }
+button.ns-picker:focus,
+button.ns-picker.open { border-color: var(--vscode-focusBorder); outline: none; }
+.ns-picker-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A chevron in place of the select's own arrow. */
+button.ns-picker::after {
+  content: '';
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin: -3px 1px 0 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0.8;
+}
+
+/*
+ * The list it opens: fixed on the body like the row menu, so the table's
+ * scroller can't clip it, and placed under the trigger by `placeNsMenu`, which
+ * also caps its height to the room below.
+ */
+.ns-menu {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 360px;
+  padding: 4px;
+  border: 1px solid var(--vscode-menu-border, var(--border));
+  border-radius: var(--radius);
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+.ns-menu input.ns-filter { flex: none; min-width: 0; }
+.ns-options {
+  min-height: 0;
+  overflow-y: auto;
+  user-select: none;
+}
+.ns-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* A tick on the namespace in force, in a slot every row keeps so the names
+ * stay aligned. */
+.ns-option::before {
+  content: '';
+  flex: none;
+  width: 1em;
+  margin-right: -6px;
+}
+.ns-option.current::before { content: '✓'; }
+.ns-option.active {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}
+.ns-option .ns-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ns-option .ns-count { opacity: 0.7; font-variant-numeric: tabular-nums; }
+/* The typed text within each name, as VS Code's quick pick marks it. */
+.ns-option mark {
+  background: transparent;
+  color: var(--vscode-list-highlightForeground, inherit);
+  font-weight: 600;
+}
+.ns-option.active mark { color: var(--vscode-list-focusHighlightForeground, inherit); }
+.ns-empty { padding: 4px 8px; opacity: 0.7; }
 
 /*
  * Only actionable while a filter is on, but it stays in the row disabled

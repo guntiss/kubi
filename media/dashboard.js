@@ -641,6 +641,7 @@
     if (rail) rail.scrollTop = railScroll;
     restoreDetailScroll(detail);
     restoreSearchFocus(caret);
+    syncNsMenu();
   }
 
   /** The filter box, if it is on screen. */
@@ -924,34 +925,259 @@
     return state.active !== 'overview' && state.active !== 'about';
   }
 
-  function renderNamespacePicker() {
+  /** The namespace the picker shows as chosen; unset reads as all of them. */
+  function currentNamespace() {
+    return state.namespace || state.allNamespaces;
+  }
+
+  function namespaceOptions() {
     const options = [state.allNamespaces, ...state.namespaces.filter((n) => n !== state.allNamespaces)];
     // Keep the current value selectable even before the namespace list arrives.
     if (state.namespace && !options.includes(state.namespace)) {
       options.push(state.namespace);
     }
-    const counts = namespaceCounts();
-    return el('select', {
-      class: 'ns-picker',
-      title: 'Namespace',
-      onchange: (e) => {
-        state.namespace = e.target.value;
-        // A selection that hides the selected row would leave the panel open on
-        // something no longer in the table.
-        if (state.selected && !inNamespace(state.selected)) selectRow(null);
-        // The rows are already here; only the view changes. Tell the extension
-        // so the choice survives a reopen.
-        post({ type: 'setNamespace', namespace: state.namespace });
-        // The status picker counts within the namespace, so its options move
-        // with this; rebuilding the row keeps them honest.
-        renderFiltersOnly();
-        renderContentOnly();
-      }
-    }, ...options.map((ns) =>
-      el('option', { value: ns, selected: ns === state.namespace },
-        `${nsLabel(ns)} (${counts.get(ns) ?? 0})`)
-    ));
+    return options;
   }
+
+  /**
+   * The namespace picker's trigger. A native select only jumps to a first
+   * letter, which on a cluster with dozens of namespaces is barely faster than
+   * scrolling, so this is a button dressed as the select beside it that opens
+   * a list with a filter box at its head. Typing on the closed button opens it
+   * with that keystroke already in the box.
+   */
+  function renderNamespacePicker() {
+    const ns = currentNamespace();
+    const label = `${nsLabel(ns)} (${namespaceCounts().get(ns) ?? 0})`;
+    return el('button', {
+      class: 'ns-picker' + (nsMenu ? ' open' : ''),
+      type: 'button',
+      title: `Namespace: ${nsLabel(ns)} — type to filter`,
+      'aria-haspopup': 'listbox',
+      'aria-expanded': nsMenu ? 'true' : 'false',
+      onclick: () => (nsMenu ? closeNsMenu(true) : openNsMenu('')),
+      onkeydown: (e) => {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          openNsMenu('');
+        } else if (e.key.length === 1 && e.key !== ' ') {
+          // Swallowed here and replayed into the box, so the first letter is
+          // neither lost nor typed twice.
+          e.preventDefault();
+          openNsMenu(e.key);
+        }
+      }
+    }, el('span', { class: 'ns-picker-label', text: label }));
+  }
+
+  function nsTrigger() {
+    return app.querySelector('.filters .ns-picker');
+  }
+
+  /**
+   * Applies a namespace choice. The rows are already here; only the view
+   * changes.
+   */
+  function setNamespace(ns) {
+    state.namespace = ns;
+    // A selection that hides the selected row would leave the panel open on
+    // something no longer in the table.
+    if (state.selected && !inNamespace(state.selected)) selectRow(null);
+    // Tell the extension so the choice survives a reopen.
+    post({ type: 'setNamespace', namespace: state.namespace });
+    // The status picker counts within the namespace, so its options move
+    // with this; rebuilding the row keeps them honest.
+    renderFiltersOnly();
+    renderContentOnly();
+  }
+
+  /** The namespace list, while it is open. */
+  let nsMenu = null;
+
+  /**
+   * Opens the namespace list under its trigger. Like the row menu it lives on
+   * the body, so a refresh rebuilding the filter row does not take it with it;
+   * `syncNsMenu` re-aims it at the new trigger instead.
+   */
+  function openNsMenu(query) {
+    closeRowMenu();
+    closeNsMenu(false);
+    const input = el('input', {
+      class: 'ns-filter',
+      type: 'text',
+      placeholder: 'Filter namespaces…',
+      spellcheck: 'false',
+      autocomplete: 'off',
+      'aria-label': 'Filter namespaces',
+      value: query,
+      oninput: () => {
+        // A new query starts over at its best match.
+        nsMenu.active = null;
+        fillNsMenu();
+      },
+      onkeydown: nsMenuKey
+    });
+    const list = el('div', { class: 'ns-options', role: 'listbox' });
+    const menu = el('div', {
+      class: 'ns-menu',
+      // Keeps the caret in the box while an option or the list is clicked.
+      onmousedown: (e) => { if (e.target !== input) e.preventDefault(); }
+    }, input, list);
+    document.body.appendChild(menu);
+    nsMenu = { menu, input, list, active: currentNamespace(), shown: [] };
+    fillNsMenu();
+    placeNsMenu();
+    const trigger = nsTrigger();
+    trigger?.classList.add('open');
+    trigger?.setAttribute('aria-expanded', 'true');
+    input.focus();
+    input.setSelectionRange(query.length, query.length);
+  }
+
+  /** Closes the list, handing the keyboard back to its trigger if asked. */
+  function closeNsMenu(refocus) {
+    if (!nsMenu) return;
+    nsMenu.menu.remove();
+    nsMenu = null;
+    const trigger = nsTrigger();
+    if (!trigger) return;
+    trigger.classList.remove('open');
+    trigger.setAttribute('aria-expanded', 'false');
+    if (refocus) trigger.focus();
+  }
+
+  /**
+   * The namespaces a query leaves, those starting with it ahead of those that
+   * merely contain it — "kube" should land on kube-system first, not on a
+   * namespace that happens to end in it.
+   */
+  function matchNamespaces(query) {
+    const q = query.trim().toLowerCase();
+    const matches = [];
+    for (const ns of namespaceOptions()) {
+      const at = q ? nsLabel(ns).toLowerCase().indexOf(q) : -1;
+      if (!q || at !== -1) matches.push({ ns, at, length: q.length });
+    }
+    return matches.sort((a, b) => (a.at === 0 ? 0 : 1) - (b.at === 0 ? 0 : 1));
+  }
+
+  /** Rebuilds the list from the query, keeping the highlighted entry if it survives. */
+  function fillNsMenu() {
+    const { input, list } = nsMenu;
+    const matches = matchNamespaces(input.value);
+    const counts = namespaceCounts();
+    const current = currentNamespace();
+    nsMenu.shown = matches.map((m) => m.ns);
+    if (!nsMenu.shown.includes(nsMenu.active)) nsMenu.active = nsMenu.shown[0] ?? null;
+    list.textContent = '';
+    if (!matches.length) {
+      list.appendChild(el('div', { class: 'ns-empty', text: 'No matching namespace' }));
+      return;
+    }
+    for (const { ns, at, length } of matches) {
+      const label = nsLabel(ns);
+      const name = at === -1 ? [label] : [
+        label.slice(0, at),
+        el('mark', {}, label.slice(at, at + length)),
+        label.slice(at + length)
+      ];
+      list.appendChild(el('div', {
+        class: 'ns-option' + (ns === nsMenu.active ? ' active' : '') + (ns === current ? ' current' : ''),
+        role: 'option',
+        'aria-selected': ns === current ? 'true' : 'false',
+        'data-ns': ns,
+        // Movement rather than entry, so the list scrolling under a resting
+        // pointer during arrow-key travel doesn't snatch the highlight back.
+        onmousemove: () => { if (nsMenu.active !== ns) setNsActive(ns); },
+        onclick: () => pickNamespace(ns)
+      }, el('span', { class: 'ns-name' }, ...name),
+      el('span', { class: 'ns-count', text: String(counts.get(ns) ?? 0) })));
+    }
+    activeNsOption()?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function activeNsOption() {
+    return [...nsMenu.list.children].find((node) => node.dataset.ns === nsMenu.active);
+  }
+
+  function setNsActive(ns) {
+    nsMenu.active = ns;
+    for (const node of nsMenu.list.children) {
+      node.classList.toggle('active', node.dataset.ns === ns);
+    }
+    activeNsOption()?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function pickNamespace(ns) {
+    closeNsMenu(false);
+    if (ns !== currentNamespace()) setNamespace(ns);
+    nsTrigger()?.focus();
+  }
+
+  /**
+   * Keys in the filter box. Escape and Tab stop here: the page's own Escape
+   * would otherwise go on to close the detail panel or clear the ticks behind
+   * a list that was only being dismissed.
+   */
+  function nsMenuKey(e) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const { shown } = nsMenu;
+      if (!shown.length) return;
+      const at = shown.indexOf(nsMenu.active);
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      setNsActive(shown[at === -1 ? 0 : (at + step + shown.length) % shown.length]);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (nsMenu.active !== null) pickNamespace(nsMenu.active);
+    } else if (e.key === 'Escape' || e.key === 'Tab') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeNsMenu(true);
+    }
+  }
+
+  function placeNsMenu() {
+    const trigger = nsTrigger();
+    if (!trigger) return closeNsMenu(false);
+    const box = trigger.getBoundingClientRect();
+    const { menu } = nsMenu;
+    menu.style.minWidth = `${box.width}px`;
+    menu.style.maxHeight = `${Math.max(120, Math.min(360, window.innerHeight - box.bottom - 8))}px`;
+    menu.style.top = `${box.bottom + 2}px`;
+    menu.style.left = `${Math.max(4, Math.min(box.left, window.innerWidth - menu.offsetWidth - 4))}px`;
+  }
+
+  /**
+   * Called after the filter row is rebuilt. Rows or the namespace list may
+   * have landed under the open list, so its counts are redrawn and it is
+   * re-aimed at the new trigger — or closed, on a page with no picker.
+   */
+  function syncNsMenu() {
+    if (!nsMenu) return;
+    if (!nsTrigger()) return closeNsMenu(false);
+    fillNsMenu();
+    placeNsMenu();
+  }
+
+  /** Whether `node` is the list or its trigger, whose own click toggles it. */
+  function inNsPicker(node) {
+    return nsMenu.menu.contains(node) || Boolean(nsTrigger()?.contains(node));
+  }
+
+  // Much as the row menu is dismissed: a press or focus landing anywhere else,
+  // or the panel losing focus or size. Not a scroll, though — the filter row
+  // stays put while the table scrolls, and a refresh putting the table's
+  // scroll back would otherwise shut the list mid-word.
+  document.addEventListener('mousedown', (e) => {
+    if (nsMenu && !inNsPicker(e.target)) closeNsMenu(false);
+  }, true);
+  document.addEventListener('focusin', (e) => {
+    if (nsMenu && !inNsPicker(e.target)) closeNsMenu(false);
+  });
+  window.addEventListener('blur', () => closeNsMenu(false));
+  window.addEventListener('resize', () => closeNsMenu(false));
 
   /**
    * What the status picker counts over: everything the namespace leaves
@@ -1236,6 +1462,7 @@
       const restored = app.querySelector(`.filters .${focused}`);
       if (restored) restored.focus();
     }
+    syncNsMenu();
   }
 
   function renderMain() {
