@@ -894,15 +894,45 @@ tbody tr.warn:hover { background: rgba(224, 138, 30, calc(0.20 + 0.18 * var(--pu
 }
 
 /*
- * A ticked row gets no fill of its own, since a tint would hide the health wash
- * of a failing or pending row and the refresh flash drawn over it. It gets a
- * bar down its leading edge instead: visible from across the table, where the
- * box alone is not, and on any background the row happens to have.
+ * A ticked row is tinted with the focus colour at the drag marquee's strength,
+ * so a drag-select lands as the same colour it was drawn in. Blue-leaning on
+ * the stock themes, it stays apart from the grey of hover and the red and
+ * orange of the health washes.
  *
- * The bar runs through the cell's bottom border, so a run of ticked rows reads
- * as one unbroken stripe — the set is seen as a block, not counted box by box.
- * The focus colour, as the drag marquee uses, so a drag-select lands as the
- * same colour it was drawn in.
+ * The tint is a background image on the cells rather than the row's
+ * background colour, which the hover and the health washes already own. Cells
+ * paint over their row, so the tint lies on top of whichever of those the row
+ * has: a failing row that is ticked still reads red under the blue, a pending
+ * one still pulses, and hovering a ticked row still lightens it. The open row
+ * is left out; its selection fill outranks everything, as below.
+ */
+tbody tr.checked:not(.selected) > td {
+  --tick-tint: color-mix(in srgb, var(--vscode-focusBorder) 15%, transparent);
+  background-image: linear-gradient(var(--tick-tint), var(--tick-tint));
+}
+
+/*
+ * At full strength the blue over a health wash mixes to a purple or a grey
+ * that reads as neither, which loses the row's state exactly when it is about
+ * to be acted on. On those rows the tint is halved and the wash is deepened a
+ * step instead, so a ticked failing row is still plainly red, and plainly
+ * different from an unticked one. Each keeps a hover shade above its own.
+ * Before the open-row rule, which outranks these at equal specificity.
+ */
+tbody tr.checked.bad:not(.selected) > td,
+tbody tr.checked.warn:not(.selected) > td {
+  --tick-tint: color-mix(in srgb, var(--vscode-focusBorder) 7%, transparent);
+}
+tbody tr.bad.checked { background: rgba(244, 76, 76, 0.17); }
+tbody tr.bad.checked:hover { background: rgba(244, 76, 76, 0.26); }
+tbody tr.warn.checked { background: rgba(224, 138, 30, calc(0.14 + 0.20 * var(--pulse))); }
+tbody tr.warn.checked:hover { background: rgba(224, 138, 30, calc(0.24 + 0.18 * var(--pulse))); }
+
+/*
+ * A ticked row also gets a bar down its leading edge, which reads from across
+ * the table where a light tint alone does not. The bar runs through the cell's
+ * bottom border, so a run of ticked rows reads as one unbroken stripe — the set
+ * is seen as a block, not counted box by box.
  *
  * A pseudo-element rather than an inset `box-shadow`, which the cursor and
  * menu rows already use on this cell and would have to be restated with it.
