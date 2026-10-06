@@ -12,7 +12,7 @@
 
   /** @type {{kinds: any[], context: string, cluster: string, allNamespaces: string,
    *  active: string, namespace: string, namespaces: string[], rows: any[],
-   *  empty: boolean, stale: boolean, busy: boolean,
+   *  empty: boolean, stale: boolean, busy: boolean, reloading: boolean,
    *  error: string, refreshError: string, filter: string, status: string,
    *  sort: {key: string, dir: number}, selected: any, generated: number}} */
   const state = {
@@ -89,6 +89,11 @@
     stale: false,
     /** A refresh is in flight; shows a spinner beside the freshness label. */
     busy: false,
+    /**
+     * A refresh the user asked for (Ctrl/Cmd+R) has not finished yet. It puts
+     * the load bar up however young the rows on screen are; see `syncLoadBar`.
+     */
+    reloading: false,
     error: '',
     /** A refresh failed while cached content is on screen. */
     refreshError: '',
@@ -1883,6 +1888,13 @@
     return el('div', { class: 'toolbar' }, ...children);
   }
 
+  /**
+   * Whether the toolbar offers a Refresh button. Hidden for now: Ctrl/Cmd+R
+   * does the same, and the button's square is kept for the spinner, so turning
+   * it back on is this flag alone.
+   */
+  const SHOW_REFRESH_BUTTON = false;
+
   function renderRefreshError() {
     if (!state.refreshError) return null;
     return el('span', {
@@ -1904,10 +1916,11 @@
         el('span', { class: 'spinner' })
       );
     }
+    if (!SHOW_REFRESH_BUTTON) return el('span', { class: 'refresh-slot', 'aria-hidden': 'true' });
     return el('button', {
       class: 'refresh-slot refresh',
-      onclick: () => select(state.active),
-      title: 'Refresh',
+      onclick: reload,
+      title: 'Refresh (Ctrl/Cmd+R)',
       'aria-label': 'Refresh'
     }, refreshMark());
   }
@@ -1989,7 +2002,10 @@
 
   function syncLoadBar() {
     const old = state.generated > 0 && Date.now() - state.generated > STALE_AFTER_MS;
-    loadBar.classList.toggle('active', state.busy && old);
+    // A refresh asked for by hand is shown whatever the rows' age: the key
+    // press has nothing else on screen to answer it, and the bar goes up on the
+    // press rather than when the extension's reply arrives.
+    loadBar.classList.toggle('active', state.reloading || (state.busy && old));
   }
 
   /**
@@ -6462,6 +6478,7 @@
       state.empty = true;
       state.generated = 0;
       state.refreshError = '';
+      state.reloading = false;
       state.filter = '';
       // A scope names a workload that only means something for the table it
       // was opened from; leaving the pods view abandons it. `showOwned` sets
@@ -6482,6 +6499,18 @@
     state.error = '';
     post({ type: 'load', kind: kindId });
     render();
+  }
+
+  /**
+   * Fetches the view on screen again, leaving everything else as it is — an
+   * open drawer, the filter, the ticks and the scroll all stay. The extension
+   * drops it if a refresh of this view is already running, and that one's end
+   * is what takes the bar down.
+   */
+  function reload() {
+    state.reloading = true;
+    syncLoadBar();
+    post({ type: 'load', kind: state.active });
   }
 
   // ---------- messages ----------
@@ -6575,6 +6604,7 @@
       case 'busy':
         if (message.kind !== state.active) break;
         state.busy = Boolean(message.busy);
+        if (!state.busy) state.reloading = false;
         // Clearing the last failure optimistically only makes sense for a
         // refresh the user asked for: it acknowledges the click. An unattended
         // poll spins up on its own every few seconds, and wiping the banner on
@@ -6593,6 +6623,7 @@
         // has a fetch coming to replace it, so it is cached rather than live.
         // Not an error: this is what was asked for.
         state.busy = false;
+        state.reloading = false;
         state.refreshError = '';
         if (!state.empty) state.stale = true;
         renderFreshnessOnly();
@@ -6704,6 +6735,7 @@
           state.refreshError = message.message;
         }
         state.busy = false;
+        state.reloading = false;
         render();
         break;
       case 'editing':
@@ -6762,6 +6794,7 @@
       case 'fatal':
         state.error = message.message;
         state.busy = false;
+        state.reloading = false;
         render();
         break;
     }
@@ -6818,6 +6851,21 @@
     e.preventDefault();
     e.stopPropagation();
     if (!deleteDialog && !rowMenu && isTable() && !state.selected) checkAllShown(true);
+  }, true);
+
+  /**
+   * Ctrl/Cmd+R refreshes the view, in place of the toolbar button. Stopped on
+   * the way down for the same reason as Ctrl/Cmd+A above: left to bubble, the
+   * workbench would also get it and run its own binding — Open Recent, or a
+   * window reload in a development host. Taken from a text field too, where it
+   * means nothing else.
+   */
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    if (e.key !== 'r' && e.key !== 'R') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!deleteDialog && !e.repeat) reload();
   }, true);
 
   document.addEventListener('keydown', (e) => {

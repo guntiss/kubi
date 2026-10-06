@@ -81,7 +81,8 @@ hand to a coding agent with the whole thing in view.
   table to draw a selection box, as on the desktop: a plain drag replaces the
   ticks, **Shift** adds to them and **Ctrl**/**Cmd** flips the rows it covers.
   Dragging is experimental; turn it off with `kubi.dragToSelect`.
-  **Ctrl**/**Cmd**+**A** ticks every row shown.
+  **Ctrl**/**Cmd**+**A** ticks every row shown. **Ctrl**/**Cmd**+**R** refreshes
+  the view, with a progress bar across the top until it lands.
 
   Columns size themselves to their content and to the pane: when a table is
   too wide, the long text columns (node names, messages) give way before
