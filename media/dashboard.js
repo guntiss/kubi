@@ -5661,7 +5661,7 @@
    * How logs are read rather than which log is showing, so these outlive the
    * row: set once, they hold for every drawer until the dashboard is closed.
    */
-  const logPrefs = { wrap: true, timestamps: false };
+  const logPrefs = { wrap: false, timestamps: true };
 
   /**
    * The Logs tab of the object in the drawer, or null while there is none.
