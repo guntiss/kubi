@@ -100,8 +100,7 @@ to act on, since the same workload name exists in every cluster.
 
 **Secrets show key names, never values — unless asked, one key at a time.** The
 table and its refresh never fetch `data`. Reveal and Copy in the drawer fetch a
-single key on demand, keep nothing in the cache or webview state, and are gated by
-`kubi.allowSecretReveal` on both sides of the message.
+single key on demand and keep nothing in the cache or webview state.
 
 ## Releasing
 

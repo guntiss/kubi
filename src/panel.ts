@@ -412,9 +412,6 @@ export class DashboardPanel {
         if (e.affectsConfiguration('kubi.dragToSelect')) {
           this.post({ type: 'dragToSelect', enabled: dragToSelect() });
         }
-        if (e.affectsConfiguration('kubi.allowSecretReveal')) {
-          this.post({ type: 'allowSecretReveal', enabled: allowSecretReveal() });
-        }
       })
     );
   }
@@ -742,8 +739,7 @@ export class DashboardPanel {
       railCollapsed: this.extension.globalState.get<boolean>(RAIL_COLLAPSED_KEY, false),
       railGroups: this.extension.globalState.get<Record<string, boolean>>(RAIL_GROUPS_KEY, {}),
       columnLayouts: this.extension.globalState.get<Record<string, ColumnLayout>>(COLUMN_LAYOUTS_KEY, {}),
-      dragToSelect: dragToSelect(),
-      allowSecretReveal: allowSecretReveal()
+      dragToSelect: dragToSelect()
     });
     // A webview reload loses its state but not the kubectl processes behind it,
     // so edits in flight have to be replayed or their buttons come back enabled.
@@ -2117,10 +2113,6 @@ export class DashboardPanel {
   private async secretValue(message: Extract<Inbound, { type: 'secretValue' }>): Promise<void> {
     const { mode, name, namespace, key } = message;
     const reply = { type: 'secretValue', name, namespace, key };
-    if (!allowSecretReveal()) {
-      this.post({ ...reply, error: 'Revealing Secret values is turned off (kubi.allowSecretReveal).' });
-      return;
-    }
     try {
       const encoded = (await k.secretKeyValue(name, key, this.contextName, namespace)).trim();
       const bytes = Buffer.from(encoded, 'base64');
@@ -2528,10 +2520,6 @@ function isKnownKind(id: string): boolean {
 }
 
 /** Whether a drag across a table draws a selection box. On unless turned off. */
-function allowSecretReveal(): boolean {
-  return vscode.workspace.getConfiguration('kubi').get<boolean>('allowSecretReveal') ?? true;
-}
-
 function dragToSelect(): boolean {
   return vscode.workspace.getConfiguration('kubi').get<boolean>('dragToSelect') ?? true;
 }

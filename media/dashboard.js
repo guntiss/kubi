@@ -81,8 +81,6 @@
      * changes.
      */
     dragToSelect: true,
-    /** Whether the drawer offers Reveal and Copy for Secret values (`kubi.allowSecretReveal`). */
-    allowSecretReveal: true,
     /** True until this kind has ever produced content (cached or fresh). */
     empty: true,
     /** Content on screen came from cache rather than a completed fetch. */
@@ -5279,7 +5277,7 @@
    * Copy sends it to the clipboard from the extension without showing it.
    */
   function renderSecretData(row) {
-    if (state.active !== 'secrets' || !state.allowSecretReveal) return null;
+    if (state.active !== 'secrets') return null;
     const keys = currentRow(row).secretKeys || [];
     if (!keys.length) return null;
     return el('div', { class: 'secret-data' },
@@ -6582,7 +6580,6 @@
         state.railGroups = message.railGroups || {};
         state.columnLayouts = message.columnLayouts || {};
         state.dragToSelect = Boolean(message.dragToSelect);
-        state.allowSecretReveal = message.allowSecretReveal !== false;
         render();
         break;
       case 'columnLayouts':
@@ -6592,11 +6589,6 @@
         state.columnLayouts = message.layouts || {};
         renderContentOnly();
         fitTable();
-        break;
-      case 'allowSecretReveal':
-        state.allowSecretReveal = Boolean(message.enabled);
-        if (!state.allowSecretReveal) clearSecretValues();
-        renderContentOnly();
         break;
       case 'secretValue': {
         // Same staleness rule as describe: a reply for a row that is no longer

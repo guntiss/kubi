@@ -149,8 +149,7 @@ fetches or caches them. A Secret's drawer adds a Data section where each key has
 **Reveal**, which fetches that one value fresh and shows it decoded until you hide
 it, close the drawer or 30 seconds pass, and **Copy**, which puts it on the
 clipboard without displaying it. A value that is not UTF-8 shows as
-`<binary, N bytes>` and copies as base64. Set `kubi.allowSecretReveal` to `false`
-(in a workspace's settings, say) to remove both.
+`<binary, N bytes>` and copies as base64.
 
 ### About
 
