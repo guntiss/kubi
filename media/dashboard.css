@@ -323,6 +323,13 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
   border-bottom: 1px solid var(--border);
   background: var(--header-bg);
   flex: none;
+  /*
+   * As tall as a row of filters, so a page without any (Overview, About) gets
+   * the same band as a table rather than one shrunk to its title. The 26px is
+   * the Columns button's square, which the filter controls also come to; the
+   * padding and the rule sit on top of it under border-box sizing.
+   */
+  min-height: calc(26px + 2 * 8px + 1px);
 }
 
 /*
