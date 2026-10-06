@@ -139,7 +139,47 @@ button.brand:hover .chevron { color: var(--vscode-foreground); }
   flex: none;
   color: var(--vscode-charts-blue, #4a9eff);
 }
-button.brand:hover .mark { color: var(--vscode-foreground); }
+
+/*
+ * Hovering charges the mark. The hexagon turns a third of the way round,
+ * overshooting and settling back, while the bolt flickers like a strike and
+ * the mark lights up, keeping a soft glow for as long as the pointer stays.
+ *
+ * A third of a turn is a multiple of the hexagon's own symmetry, so it ends
+ * looking exactly as it started: leaving drops the animation outright, with
+ * no turn back to watch and no jump, and the next hover plays it afresh.
+ * Each part turns and scales about its own centre, not the SVG's corner.
+ */
+.brand .mark-hex,
+.brand .mark-bolt {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+button.brand:hover .mark { animation: mark-glow 0.9s ease-out forwards; }
+button.brand:hover .mark-hex { animation: mark-turn 0.75s cubic-bezier(0.3, 1.6, 0.5, 1); }
+button.brand:hover .mark-bolt { animation: mark-strike 0.6s linear; }
+@keyframes mark-turn {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(120deg); }
+}
+@keyframes mark-strike {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  8% { opacity: 0.15; transform: scale(0.9); }
+  16% { opacity: 1; transform: scale(1.2); }
+  26% { opacity: 0.35; }
+  36% { opacity: 1; transform: scale(1.1); }
+  60% { transform: scale(1); }
+}
+@keyframes mark-glow {
+  0% { filter: none; }
+  20%, 40% { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 6px currentColor); }
+  100% { filter: drop-shadow(0 0 2px currentColor); }
+}
+/* Still lit, without the motion. */
+@media (prefers-reduced-motion: reduce) {
+  button.brand:hover .mark-hex,
+  button.brand:hover .mark-bolt { animation: none; }
+}
 
 /*
  * Go to: a button dressed as a search field, under the brand row.

@@ -255,8 +255,10 @@
       for (const [key, value] of Object.entries(extra || {})) node.setAttribute(key, value);
       return node;
     };
-    svg.appendChild(path(BRAND_HEX, { 'stroke-linejoin': 'round' }));
-    svg.appendChild(path(BRAND_BOLT, { fill: 'currentColor', stroke: 'none' }));
+    // Classed so the hover animation can turn the hexagon and strike the bolt
+    // apart; see `.mark-hex` in the CSS.
+    svg.appendChild(path(BRAND_HEX, { 'stroke-linejoin': 'round', class: 'mark-hex' }));
+    svg.appendChild(path(BRAND_BOLT, { fill: 'currentColor', stroke: 'none', class: 'mark-bolt' }));
     return svg;
   }
 

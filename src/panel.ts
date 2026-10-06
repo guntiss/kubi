@@ -54,9 +54,9 @@ interface ColumnLayout {
  */
 const BRAND_MARK =
   '<svg class="mark" viewBox="0 0 128 128" aria-hidden="true">'
-  + '<path d="M64 12 108 37.5v51L64 114 20 88.5v-51L64 12Z" fill="none"'
+  + '<path class="mark-hex" d="M64 12 108 37.5v51L64 114 20 88.5v-51L64 12Z" fill="none"'
   + ' stroke="currentColor" stroke-width="9" stroke-linejoin="round"/>'
-  + '<path d="M71 33 45 71h16l-5 24 28-39H68l3-23Z" fill="currentColor"/>'
+  + '<path class="mark-bolt" d="M71 33 45 71h16l-5 24 28-39H68l3-23Z" fill="currentColor"/>'
   + '</svg>';
 
 /** The rail's Go to magnifier, as `searchMark()` in dashboard.js draws it. */

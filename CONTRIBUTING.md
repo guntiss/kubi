@@ -52,7 +52,8 @@ The mark — a lightning bolt inside the Kubernetes hexagon — is drawn four
 times: `media/icon.svg` for the marketplace tile, `media/icon-mono.svg` for the
 activity bar, and inline in both `src/panel.ts` (`BRAND_MARK`) and
 `media/dashboard.js` (`BRAND_HEX`/`BRAND_BOLT`) for the dashboard rail. The two
-inline copies share their path data; change one and change the other.
+inline copies share their path data, and the `mark-hex`/`mark-bolt` classes the
+rail's hover animation moves them by; change one and change the other.
 
 Everywhere but the tile the mark is a single colour: the activity bar masks it
 to a flat silhouette, and the rail tints it with `currentColor`. So the bolt and
