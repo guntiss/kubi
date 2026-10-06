@@ -5,7 +5,10 @@ export type Health = 'ok' | 'warn' | 'bad' | 'muted';
 export interface Column {
   key: string;
   label: string;
-  /** Hidden below ~900px in the webview. */
+  /**
+   * Steps aside in a window narrower than ~900px, unless the user has chosen
+   * to show it from the column menu.
+   */
   secondary?: boolean;
   /** Right-align numeric-ish values. */
   numeric?: boolean;

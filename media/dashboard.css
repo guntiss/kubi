@@ -310,30 +310,28 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
 /*
- * The header band: title row plus the filter row under it. Both carry the same
- * tinted background so they read as one surface sitting above the table, which
- * keeps its own (editor-background) colour.
+ * The header band: the title, a table's filters and the refresh controls, in
+ * one row. It carries a tinted background so it reads as a surface sitting
+ * above the table, which keeps its own (editor-background) colour.
  */
 .toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 8px 10px 8px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--header-bg);
   flex: none;
 }
 
-/* The filter row underneath carries the separator for both. */
-.toolbar.with-filters { border-bottom: none; padding-bottom: 4px; }
-
 /*
  * The refresh control and the spinner that stands in for it while a fetch is in
  * flight occupy one fixed square, so the toolbar doesn't shift as they swap.
  * The icon carries the button on its own: a label would only repeat the tooltip
- * at the cost of the width.
+ * at the cost of the width. The Columns button beside it is the same square.
  */
-.toolbar .refresh-slot {
+.toolbar .refresh-slot,
+.toolbar .columns-button {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -365,23 +363,26 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
   height: 14px;
 }
 
+/* Drawn at the size the refresh arrow is, so the pair carry the same weight. */
+.columns-mark { width: 15px; height: 15px; flex: none; }
+
 /*
- * The filter row. Its own line rather than more controls on the toolbar: the
- * pickers grow with the data — a cluster's status words are not a fixed list —
- * and would otherwise squeeze out the title, count and freshness label.
+ * A table's filters, in the toolbar between the title and the controls on the
+ * right. The group takes the width they leave and wraps inside it, so pickers
+ * that grow with the data — a cluster's status words are not a fixed list —
+ * push the query box onto a second line rather than the title or the
+ * freshness label off the row.
  */
 .filters {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 16px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--header-bg);
-  flex: none;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
   flex-wrap: wrap;
 }
 
-.title { font-size: 1.15em; font-weight: 600; }
+.title { font-size: 1.15em; font-weight: 600; flex: none; }
 .spacer { flex: 1; }
 
 .freshness {
@@ -467,7 +468,7 @@ input.search, input.pick-filter, select {
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, var(--border));
   border-radius: var(--radius);
-  padding: 5px 9px;
+  padding: 4px 8px;
   font-family: inherit;
   font-size: inherit;
   outline: none;
@@ -570,7 +571,7 @@ button.ns-picker {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 9px;
+  padding: 4px 8px;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, var(--border));
@@ -670,7 +671,7 @@ button.ns-picker::after {
  * Only actionable while a filter is on, but it stays in the row disabled
  * rather than vanishing, so the toolbar reads the same either way.
  */
-button.clear-filters { flex: none; }
+button.clear-filters { flex: none; padding: 4px 9px; }
 /* Dimmed, and without the hover that would invite a click that does
  * nothing. */
 button.clear-filters:disabled {
@@ -716,46 +717,132 @@ button.danger:hover {
   cursor: help;
 }
 
-.content { flex: 1; overflow: auto; position: relative; }
+/*
+ * The vertical scrollbar's gutter is kept whether or not the rows overflow, so
+ * the width a table is fitted to doesn't change when it starts to scroll — and
+ * can be read while the table is still out of layout; see `fitTable`.
+ */
+.content { flex: 1; overflow: auto; position: relative; scrollbar-gutter: stable; }
 
 /* ---------- table ---------- */
 
 table { width: 100%; border-collapse: collapse; }
 
+/*
+ * The resource tables lay out at fixed column widths: each column takes its
+ * width from the colgroup, which `fitTable` fills in, rather than the browser
+ * working one out from whatever rows are on screen. That is what lets a column
+ * be dragged to a width and stay there, and what keeps the columns still while
+ * a refresh or a filter changes the rows under them — under automatic layout
+ * a long status word arriving, or a filter dropping the longest name, moved
+ * every column on the row.
+ *
+ * The last column is an empty filler that takes whatever the real ones leave,
+ * so hover, health tints and the cursor outline still run the full width of
+ * the pane. When the columns need more than the pane, the table grows past it
+ * (fixed layout's width is the larger of the two) and the pane scrolls.
+ */
+table.grid { table-layout: fixed; }
+table.grid col.check { width: 30px; }
+table.grid th.fill, table.grid td.fill { padding: 0; }
+table.grid th.fill { cursor: default; }
+
+/*
+ * The hidden copy `measureColumns` lays out to its content and reads the
+ * column widths off. Out of the flow and unpainted; it lives for one
+ * synchronous measurement and is gone before the frame is drawn.
+ */
+table.grid.measuring {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: auto;
+  table-layout: auto;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/*
+ * Sized like VS Code's own lists rather than like a document table: a header
+ * and rows close to the editor's 22px line, in the sentence-case labels the
+ * workbench uses. Uppercase, letter-spaced labels read as a heading over every
+ * column, and cost a column's worth of width across a wide table.
+ */
 thead th {
   position: sticky;
   top: 0;
   z-index: 1;
   text-align: left;
   font-weight: 600;
-  font-size: 0.85em;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 0.92em;
   color: var(--muted);
-  padding: 9px 14px;
+  padding: 5px 10px;
   background: var(--vscode-editor-background);
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 thead th:hover { color: var(--vscode-foreground); }
 thead th .arrow { opacity: 0.55; font-size: 0.85em; }
 
 tbody td {
-  padding: 7px 14px;
+  padding: 3px 10px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 420px;
 }
 
 /*
- * The event message is the column worth reading and the only one without a
- * predictable width, so it gets whatever the fixed columns leave over rather
- * than the shared cap. It still ellipsises, with the full text on hover.
+ * The handle along a header's right edge that resizes its column. A short
+ * rule marks every column boundary at rest, so the header reads as a row of
+ * adjustable cells; it lengthens into the focus colour on hover, and while
+ * dragging, over the edge that will move.
  */
-td.message, th.message { max-width: none; width: 100%; }
+.col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.col-resize::after {
+  content: '';
+  position: absolute;
+  top: 30%;
+  bottom: 30%;
+  right: 0;
+  width: 1px;
+  background: var(--border);
+}
+.col-resize:hover::after,
+body.col-resizing .col-resize:active::after {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--vscode-focusBorder);
+}
+
+/* The header being moved, and the line marking the gap it would drop into. */
+thead th.col-dragging {
+  color: var(--vscode-foreground);
+  background: var(--vscode-list-hoverBackground);
+}
+.col-drop {
+  position: fixed;
+  z-index: 30;
+  width: 2px;
+  background: var(--vscode-focusBorder);
+  pointer-events: none;
+}
+
+/* Mid-drag the cursor says what the drag is doing wherever the pointer goes. */
+body.col-moving, body.col-moving * { cursor: grabbing !important; }
+body.col-resizing, body.col-resizing * { cursor: col-resize !important; }
 
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--vscode-list-hoverBackground); }
@@ -981,10 +1068,9 @@ tbody tr.flash-new > td { --flash-tint: rgba(64, 190, 120, 0.32); }
  */
 td.check, th.check {
   width: 1px;
-  padding-right: 0;
+  padding-right: 6px;
   overflow: visible;
 }
-td.check { padding-right: 6px; }
 /* The header cell holds a control rather than a sort target. */
 thead th.check { cursor: default; }
 
@@ -1066,6 +1152,16 @@ td.numeric, th.numeric { text-align: right; font-variant-numeric: tabular-nums; 
 .pill.muted::before { background: var(--muted); }
 
 tr.selected .pill { background: rgba(255,255,255,0.18); }
+
+/*
+ * In a table the status is one value in a row of them, so it keeps the dot and
+ * drops the badge behind it. The colour is what the eye scans the column for;
+ * a column of filled badges mostly added weight, and the row's own tint
+ * already marks the ones in trouble.
+ */
+table.grid .pill,
+table.grid tr.selected .pill { background: none; color: inherit; padding: 0; font-size: inherit; }
+
 
 /* ---------- item details slide-over ---------- */
 
@@ -1593,7 +1689,7 @@ tbody td.empty-cell .state { padding: 40px 20px; }
 
 /* Table skeleton: matches thead/tbody metrics so nothing shifts on arrival. */
 .skeleton thead th { color: var(--muted); }
-.skeleton tbody td { padding: 7px 14px; border-bottom: 1px solid var(--border); }
+.skeleton tbody td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
 .sk-check { width: 13px; height: 13px; border-radius: 3px; }
 .sk-button { width: 54px; height: 20px; border-radius: 4px; }
 
@@ -2119,15 +2215,6 @@ body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackg
   .ov-newest .ov-object { display: none; }
 }
 
-/*
- * The rail used to collapse itself here as well. It no longer does: collapsing
- * is the toggle's job alone, so the rail stays in whatever state the user chose
- * at every width. Only the secondary columns still drop out, which costs
- * nothing to get back — the table reflows.
- */
-@media (max-width: 900px) {
-  .secondary { display: none; }
-}
 
 /* ---------- row context menu ---------- */
 
@@ -2171,6 +2258,17 @@ body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackg
   color: #fff;
 }
 .row-menu button:disabled { opacity: 0.5; cursor: default; }
+
+/*
+ * A menu with toggles in it — the column menu — keeps a gutter down its left
+ * for their ticks, on every item, so the labels line up whether ticked or not.
+ */
+.row-menu.has-checks button { position: relative; padding-left: 26px; }
+.row-menu button[aria-checked="true"]::before {
+  content: '✓';
+  position: absolute;
+  left: 9px;
+}
 .row-menu .separator {
   height: 1px;
   margin: 4px 6px;

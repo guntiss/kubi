@@ -17,6 +17,24 @@ const RAIL_COLLAPSED_KEY = 'kubi.railCollapsed';
 const RAIL_GROUPS_KEY = 'kubi.railGroups';
 
 /**
+ * Each table's columns as the user has arranged them, by kind id. Only their
+ * own choices are stored, as with the rail: a kind missing here, or a column
+ * missing from its entry, takes what `KINDS` declares, so a column added in a
+ * later release still turns up in a table someone has already rearranged.
+ */
+const COLUMN_LAYOUTS_KEY = 'kubi.columnLayouts';
+
+/** One table's arrangement; see COLUMN_LAYOUTS_KEY. */
+interface ColumnLayout {
+  /** Column keys, left to right. */
+  order?: string[];
+  /** Widths the user dragged a column to, in CSS pixels. */
+  widths?: Record<string, number>;
+  /** Columns explicitly shown or hidden; anything absent follows the default. */
+  visible?: Record<string, boolean>;
+}
+
+/**
  * The extension's mark for the boot shell's brand row, kept identical to
  * `brandMark()` in dashboard.js so the handover to the script is a swap of the
  * same pixels rather than a visible change. Inline for the same reason the
@@ -53,6 +71,8 @@ type Inbound =
   | { type: 'setNamespace'; namespace: string }
   | { type: 'setRailCollapsed'; collapsed: boolean }
   | { type: 'setRailGroups'; open: Record<string, boolean> }
+  /** A table's columns were moved, resized, shown or hidden; null resets them. */
+  | { type: 'setColumnLayout'; kind: string; layout: ColumnLayout | null }
   | { type: 'describe'; kind: string; name: string; namespace?: string }
   /** The events section of the details tab: what happened to this one object. */
   | { type: 'events'; kind: string; name: string; namespace?: string }
@@ -602,6 +622,23 @@ export class DashboardPanel {
         // about the work they do, not about the cluster they are looking at.
         await this.extension.globalState.update(RAIL_GROUPS_KEY, message.open);
         break;
+      case 'setColumnLayout': {
+        // Global for the same reason again. Unlike the rail it is also pushed
+        // to the other open dashboards straight away: two tables of the same
+        // kind side by side, laid out differently until one is reloaded, would
+        // read as the change not having taken.
+        const layouts = { ...this.extension.globalState.get<Record<string, ColumnLayout>>(COLUMN_LAYOUTS_KEY, {}) };
+        if (message.layout) {
+          layouts[message.kind] = message.layout;
+        } else {
+          delete layouts[message.kind];
+        }
+        await this.extension.globalState.update(COLUMN_LAYOUTS_KEY, layouts);
+        for (const panel of [...DashboardPanel.open.values()].flat()) {
+          if (panel !== this) panel.post({ type: 'columnLayouts', layouts });
+        }
+        break;
+      }
       case 'describe':
         await this.describe(message);
         break;
@@ -666,6 +703,7 @@ export class DashboardPanel {
       active: this.activeKind,
       railCollapsed: this.extension.globalState.get<boolean>(RAIL_COLLAPSED_KEY, false),
       railGroups: this.extension.globalState.get<Record<string, boolean>>(RAIL_GROUPS_KEY, {}),
+      columnLayouts: this.extension.globalState.get<Record<string, ColumnLayout>>(COLUMN_LAYOUTS_KEY, {}),
       dragToSelect: dragToSelect(),
       allowSecretReveal: allowSecretReveal()
     });

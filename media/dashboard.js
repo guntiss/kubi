@@ -31,6 +31,14 @@
      * @type {Record<string, boolean>}
      */
     railGroups: {},
+    /**
+     * Each table's columns as the user has arranged them — order, widths and
+     * which are shown — by kind id; see `columnLayout`. A kind absent here
+     * follows its declaration. Persisted globally by the extension.
+     * @type {Record<string, {order?: string[], widths?: Record<string, number>,
+     *  visible?: Record<string, boolean>}>}
+     */
+    columnLayouts: {},
     allNamespaces: '__all__',
     active: 'overview',
     namespace: '',
@@ -639,6 +647,9 @@
     app.textContent = '';
     app.appendChild(renderRail());
     app.appendChild(renderMain());
+    // Ahead of the scroll restore: until it has its widths the table fits the
+    // pane, and a horizontal position set before then would be clamped to 0.
+    layoutTable();
     const content = app.querySelector('.content');
     if (content) {
       content.scrollTop = scroll;
@@ -1666,10 +1677,10 @@
   }
 
   /**
-   * The filter row exists only for the resource tables. It sits on its own line
-   * under the toolbar because the pickers grow with the data — a cluster's
-   * status words are not a fixed list — and would otherwise squeeze the title,
-   * the count and the freshness label off the toolbar.
+   * The filters exist only for the resource tables. They sit in the toolbar
+   * in a group of their own that wraps inside its share of the row, since the
+   * pickers grow with the data — a cluster's status words are not a fixed list
+   * — and must not squeeze the title or the freshness label off it.
    */
   function showFilters() {
     return isTable() && !state.error;
@@ -1837,7 +1848,7 @@
     // the scrolling content, so it is pinned to the bottom of the view without
     // overlaying the list or needing the list to reserve room for it.
     return el('div', { class: 'main' },
-      renderToolbar(), renderFilters(), renderContent(), renderActionBar()
+      renderToolbar(), renderContent(), renderActionBar()
     );
   }
 
@@ -1848,16 +1859,21 @@
         : kind ? kind.label : state.active;
     const children = [el('span', { class: 'title', text: title })];
 
-    children.push(el('span', { class: 'spacer' }));
+    // On a table the filters share the title's row rather than taking a band
+    // of their own under it, which left the title's band holding little but
+    // the refresh button, at the cost of two table rows. They take the width
+    // between the title and the controls on the right, and wrap onto a second
+    // line inside that space when the window is too narrow for them.
+    const filters = renderFilters();
+    children.push(filters ?? el('span', { class: 'spacer' }));
 
     const refreshError = renderRefreshError();
     if (refreshError) children.push(refreshError);
 
     children.push(renderFreshness());
+    if (filters) children.push(renderColumnsButton());
     children.push(renderRefresh());
-    // The filter row below draws its own separator, so the toolbar drops its
-    // rule rather than stacking two lines a few pixels apart.
-    return el('div', { class: 'toolbar' + (showFilters() ? ' with-filters' : '') }, ...children);
+    return el('div', { class: 'toolbar' }, ...children);
   }
 
   function renderRefreshError() {
@@ -2021,6 +2037,7 @@
     const detail = captureDetailScroll();
     const next = renderContent();
     old.replaceWith(next);
+    layoutTable();
     next.scrollTop = scroll;
     next.scrollLeft = scrollX;
     restoreDetailScroll(detail);
@@ -2181,7 +2198,8 @@
     const columns = kind
       // Usage columns are left out: whether they will appear depends on the
       // rows, which are what the skeleton is standing in for.
-      ? kind.columns.filter((c) => !(c.key === 'namespace' && state.namespace !== state.allNamespaces) && !c.metric)
+      ? orderedColumns(kind).filter((c) =>
+        !(c.key === 'namespace' && state.namespace !== state.allNamespaces) && !c.metric && columnShown(kind, c))
       : [{ label: 'Namespace' }, { label: 'Name' }, { label: 'Status' }, { label: 'Age' }];
 
     // Enough rows to fill a typical pane without implying a count: the skeleton
@@ -2849,20 +2867,541 @@
   // ---------- usage metrics ----------
 
   /**
-   * The columns the table draws for a kind. Namespace is redundant unless
+   * The columns a kind's table could draw right now, in the user's order,
+   * before their own choice of which to show. Namespace is redundant unless
    * we're looking across all of them. The CPU and memory columns wait for a
    * row that has a reading: without metrics-server they would be two empty
    * columns on every row, and a stranger reading them could not tell "idle"
    * from "not measured". A share column waits, likewise, for a row with a
    * ceiling to measure against.
+   *
+   * This is also what the column menu lists: a column that would be empty or
+   * redundant is not offered, rather than offered and drawn blank.
    */
-  function tableColumns(kind) {
+  function availableColumns(kind) {
     const measured = kind.columns.some((c) => c.metric) && state.rows.some((row) => row.usage);
     const bounded = (metric) => state.rows.some((row) => row.usage && metricReading(row.usage, metric).ceiling);
-    return kind.columns.filter((c) =>
+    return orderedColumns(kind).filter((c) =>
       !(c.key === 'namespace' && state.namespace !== state.allNamespaces)
       && (!c.metric || (measured && (!c.share || bounded(c.metric))))
     );
+  }
+
+  /** The columns the table draws for a kind: what is available, less what the user has hidden. */
+  function tableColumns(kind) {
+    return availableColumns(kind).filter((c) => columnShown(kind, c));
+  }
+
+  // ---------- column layout ----------
+
+  /** The user's arrangement of a kind's table, or an empty one where they have made none. */
+  function columnLayout(kindId) {
+    return state.columnLayouts[kindId] || {};
+  }
+
+  /**
+   * Stores a kind's arrangement and hands it to the extension to keep. Empty
+   * parts are dropped, and a layout with nothing left in it is removed, so a
+   * table put back the way it started goes on following its declaration —
+   * including any column a later release adds to it.
+   */
+  function saveColumnLayout(kindId, layout) {
+    const tidy = {};
+    if (layout.order && layout.order.length) tidy.order = layout.order;
+    if (layout.widths && Object.keys(layout.widths).length) tidy.widths = layout.widths;
+    if (layout.visible && Object.keys(layout.visible).length) tidy.visible = layout.visible;
+    const empty = Object.keys(tidy).length === 0;
+    const next = { ...state.columnLayouts };
+    if (empty) {
+      delete next[kindId];
+    } else {
+      next[kindId] = tidy;
+    }
+    state.columnLayouts = next;
+    post({ type: 'setColumnLayout', kind: kindId, layout: empty ? null : tidy });
+  }
+
+  /**
+   * A kind's columns in the user's order. A column the saved order doesn't
+   * name — one added by a later release — goes in after the column it follows
+   * in the declaration, which is where it would be had it existed when the
+   * order was saved.
+   */
+  function orderedColumns(kind) {
+    const order = columnLayout(kind.id).order;
+    if (!order) return kind.columns;
+    const byKey = new Map(kind.columns.map((c) => [c.key, c]));
+    const result = order.map((key) => byKey.get(key)).filter(Boolean);
+    kind.columns.forEach((col, index) => {
+      if (result.includes(col)) return;
+      const before = kind.columns[index - 1];
+      result.splice(before ? result.indexOf(before) + 1 : 0, 0, col);
+    });
+    return result;
+  }
+
+  /**
+   * Below this window width the secondary columns step aside unless the user
+   * has asked for them. It was a media query in the stylesheet once, which had
+   * no way to know that someone had chosen to keep one of them.
+   */
+  const NARROW_PX = 900;
+
+  function narrowView() {
+    return window.innerWidth <= NARROW_PX;
+  }
+
+  /**
+   * Whether a column is drawn: the user's choice where they have made one,
+   * otherwise everything but a secondary column in a narrow window. The name
+   * is how a row is told apart, so it is the one column that cannot be hidden.
+   */
+  function columnShown(kind, col) {
+    if (col.key === 'name') return true;
+    const chosen = columnLayout(kind.id).visible?.[col.key];
+    if (chosen !== undefined) return chosen;
+    return !(col.secondary && narrowView());
+  }
+
+  function setColumnShown(kind, key, shown) {
+    const layout = columnLayout(kind.id);
+    saveColumnLayout(kind.id, { ...layout, visible: { ...layout.visible, [key]: shown } });
+    // Sorted by a column that is no longer there, the table would be in an
+    // order nothing on screen explains.
+    if (!shown && state.sort.key === key) state.sort = defaultSort(kind.id);
+    renderContentOnly();
+  }
+
+  /**
+   * Moves a column to sit before `beforeKey`, or to the end when that is null.
+   * The order saved is of every column the kind has, shown or not, so hiding
+   * one and showing it again puts it back where it was.
+   */
+  function moveColumn(kind, key, beforeKey) {
+    const order = orderedColumns(kind).map((c) => c.key).filter((k) => k !== key);
+    const at = beforeKey === null ? order.length : order.indexOf(beforeKey);
+    order.splice(at === -1 ? order.length : at, 0, key);
+    const declared = kind.columns.map((c) => c.key);
+    const layout = columnLayout(kind.id);
+    saveColumnLayout(kind.id, {
+      ...layout,
+      order: order.every((k, i) => k === declared[i]) ? undefined : order
+    });
+    renderContentOnly();
+  }
+
+  /** Drops a dragged width, handing the column back to `fitTable`. */
+  function resetColumnWidth(kind, key) {
+    const layout = columnLayout(kind.id);
+    if (!layout.widths || layout.widths[key] === undefined) return;
+    const widths = { ...layout.widths };
+    delete widths[key];
+    saveColumnLayout(kind.id, { ...layout, widths });
+    fitTable();
+  }
+
+  /** Narrowest a column can be dragged to: a few characters beside the handle. */
+  const MIN_COLUMN_PX = 40;
+
+  /**
+   * How far a text column gives way before the table scrolls sideways. The
+   * name is what a row is read by, so it holds out longest; a secondary column
+   * gives way first and furthest.
+   */
+  const NAME_FLOOR_PX = 160;
+  const TEXT_FLOOR_PX = 110;
+  const SECONDARY_FLOOR_PX = 80;
+
+  /**
+   * What each column of a table measured at, by key, kept per table node. It
+   * is taken once, when the table is built, and reused by every refit after —
+   * the pane resizing, the rail folding, a column dragged — none of which
+   * change what the cells hold.
+   */
+  const naturalWidths = new WeakMap();
+
+  /**
+   * How wide each column's content is, measured from the rows that stretch it
+   * the most rather than from the rows on screen.
+   *
+   * The rows on screen are the wrong sample. A table rebuilt while a filter is
+   * narrowing it would size itself to the few rows that matched, and keep
+   * those widths once the filter was cleared, since a refresh reconciles into
+   * the table rather than rebuilding it. So the candidates are the longest few
+   * values per column across every row the kind has, drawn into a hidden copy
+   * of the table that lays itself out to its content, whose header cells are
+   * then read off. Length in characters is only a proxy for width in a
+   * proportional font, which is why it keeps several candidates per column
+   * rather than one.
+   */
+  function measureColumns(content, columns) {
+    const PER_COLUMN = 4;
+    const picked = new Set();
+    for (const col of columns) {
+      const top = [];
+      for (const row of state.rows) {
+        const value = String(cellValue(row, col.key) ?? '');
+        const length = col.key === 'status' ? statusPillText(row, value).length : value.length;
+        if (top.length === PER_COLUMN && length <= top[PER_COLUMN - 1].length) continue;
+        top.push({ length, row });
+        top.sort((a, b) => b.length - a.length);
+        if (top.length > PER_COLUMN) top.pop();
+      }
+      for (const { row } of top) picked.add(row);
+    }
+    const rows = [...picked];
+    // Every header gets a sort arrow, so whichever column is sorted later still
+    // fits its label.
+    const probe = el('table', { class: 'grid measuring', 'aria-hidden': 'true' },
+      el('thead', {}, el('tr', {},
+        el('th', { class: 'check' }),
+        ...columns.map((col) => headerCell(col, true)),
+        el('th', { class: 'fill' })
+      )),
+      el('tbody', {}, ...rows.map((row, index) => buildRow(row, index, rows, columns)))
+    );
+    content.appendChild(probe);
+    const cells = probe.tHead.rows[0].cells;
+    const widths = {};
+    columns.forEach((col, i) => {
+      widths[col.key] = Math.ceil(cells[i + 1].getBoundingClientRect().width);
+    });
+    probe.remove();
+    return widths;
+  }
+
+  /**
+   * Shares out the pane's width. Every column starts at its dragged width or
+   * the width its content measured at. If that all fits, the event message —
+   * the one column whose text is there to be read in full — takes what is left
+   * over, and otherwise the filler after the last column does. If it doesn't
+   * fit, text columns give way, secondary ones first: within each tier the
+   * widest is trimmed first, down to the next widest and so on, so a column of
+   * long node names is cut back before a column of short namespaces is
+   * touched. Numbers, statuses, usage and anything dragged keep their width;
+   * if the table still doesn't fit, it scrolls sideways.
+   */
+  function fitWidths(columns, natural, pinned, available) {
+    const widths = columns.map((col) => pinned[col.key] ?? natural[col.key] ?? 100);
+    let total = widths.reduce((sum, w) => sum + w, 0);
+    if (total <= available) {
+      const fill = columns.findIndex((col) => col.key === 'message' && pinned[col.key] === undefined);
+      if (fill !== -1) widths[fill] += available - total;
+      return widths;
+    }
+    const flexible = (col) => pinned[col.key] === undefined && !col.numeric && !col.metric && col.key !== 'status';
+    for (const secondary of [true, false]) {
+      const tier = columns
+        .map((col, i) => i)
+        .filter((i) => flexible(columns[i]) && Boolean(columns[i].secondary) === secondary);
+      if (!tier.length) continue;
+      const floors = new Map(tier.map((i) => {
+        const floor = columns[i].key === 'name' ? NAME_FLOOR_PX : secondary ? SECONDARY_FLOOR_PX : TEXT_FLOOR_PX;
+        return [i, Math.min(widths[i], floor)];
+      }));
+      const before = tier.reduce((sum, i) => sum + widths[i], 0);
+      const target = before - (total - available);
+      const at = (level) => tier.reduce((sum, i) => sum + Math.max(floors.get(i), Math.min(widths[i], level)), 0);
+      // The highest level every column in the tier can be cut back to while
+      // the tier fits its share; bisected, since `at` only grows with it.
+      let low = 0;
+      let high = Math.max(...tier.map((i) => widths[i]));
+      for (let step = 0; step < 24; step++) {
+        const mid = (low + high) / 2;
+        if (at(mid) <= target) low = mid; else high = mid;
+      }
+      const level = Math.floor(low);
+      for (const i of tier) widths[i] = Math.max(floors.get(i), Math.min(widths[i], level));
+      total -= before - tier.reduce((sum, i) => sum + widths[i], 0);
+      if (total <= available) break;
+    }
+    return widths;
+  }
+
+  /**
+   * Gives the table on screen its column widths. Called after every rebuild,
+   * and by the observer on the pane whenever its size changes. Measures the
+   * table the first time it sees it; after that it only redistributes.
+   *
+   * `override` holds a width mid-drag, so the columns around the one being
+   * dragged give way and take back space as it moves.
+   */
+  function fitTable(override) {
+    const content = app.querySelector('.content');
+    const table = content && content.querySelector(':scope > table.grid');
+    if (!table) return;
+    const kind = kindOf(state.active);
+    if (!kind || table.getAttribute('data-kind') !== kind.id) return;
+    const columns = tableColumns(kind);
+    // The window crossing the narrow breakpoint changes which columns are
+    // drawn, not just how wide they are, and that is a rebuild. The rebuilt
+    // table has the new columns, so this does not come round again.
+    if (table.getAttribute('data-cols') !== columnSignature(columns)) {
+      renderContentOnly();
+      return;
+    }
+    // A table that has never been measured has never been fitted either, and
+    // is kept out of layout until it has been. Laid out before it has its
+    // widths, a table of a few thousand rows costs as much again as the layout
+    // it gets once it has them — a measured third of a second, on top of the
+    // one it needs anyway. The pane's gutter is reserved in the stylesheet, so
+    // its width is the same with the table hidden as with it scrolling.
+    const fresh = !naturalWidths.has(table);
+    if (fresh) table.style.display = 'none';
+    try {
+      // A pane with no size — a hidden editor tab — has nothing to fit to. The
+      // observer calls again when it is shown.
+      if (!content.clientWidth) return;
+      let natural = naturalWidths.get(table);
+      if (!natural) {
+        natural = measureColumns(content, columns);
+        naturalWidths.set(table, natural);
+      }
+      // Read off the stylesheet rather than the cell, which is not laid out
+      // while the table is hidden.
+      const check = parseFloat(getComputedStyle(table.querySelector('col.check')).width) || 0;
+      // A pixel short of the pane, so rounding never tips it into a scrollbar.
+      const available = content.clientWidth - check - 1;
+      const pinned = { ...columnLayout(kind.id).widths, ...override };
+      const widths = fitWidths(columns, natural, pinned, available);
+      const cols = table.querySelectorAll(':scope > colgroup > col[data-col]');
+      cols.forEach((col, i) => {
+        const px = `${widths[i]}px`;
+        if (col.style.width !== px) col.style.width = px;
+      });
+    } finally {
+      if (fresh) table.style.display = '';
+    }
+  }
+
+  /**
+   * Refits whenever the pane changes size: the window, the rail folding, the
+   * drawer or the action bar coming and going. It is pointed at each new pane
+   * as one is built, since a rebuild replaces the node.
+   */
+  let observedContent = null;
+  const contentObserver = new ResizeObserver(() => fitTable());
+
+  /** Fits the table just built, and keeps watching its pane. */
+  function layoutTable() {
+    const content = app.querySelector('.content');
+    if (content !== observedContent) {
+      contentObserver.disconnect();
+      if (content) contentObserver.observe(content);
+      observedContent = content;
+    }
+    fitTable();
+  }
+
+  /**
+   * A header being dragged to a new place, or null. It stays pending until the
+   * pointer has moved far enough to be a drag, so a click still sorts.
+   */
+  let columnDrag = null;
+
+  function startColumnDrag(e, key) {
+    if (e.button !== 0 || columnResize) return;
+    columnDrag = { key, th: e.currentTarget, startX: e.clientX, active: false, before: undefined, marker: null };
+    document.addEventListener('pointermove', onColumnDragMove, true);
+    document.addEventListener('pointerup', endColumnDrag, true);
+    document.addEventListener('pointercancel', endColumnDrag, true);
+  }
+
+  /**
+   * Tracks where the column would land: before whichever header's midpoint
+   * the pointer is left of. A line marks the gap it would drop into, and is
+   * hidden either side of the column itself, where dropping changes nothing.
+   */
+  function onColumnDragMove(e) {
+    const drag = columnDrag;
+    if (!drag) return;
+    // The button came up outside the panel, where the release was never heard.
+    if (!(e.buttons & 1)) {
+      endColumnDrag(e);
+      return;
+    }
+    if (!drag.active) {
+      if (Math.abs(e.clientX - drag.startX) < MARQUEE_THRESHOLD) return;
+      drag.active = true;
+      drag.th.classList.add('col-dragging');
+      document.body.classList.add('col-moving');
+      drag.marker = document.body.appendChild(el('div', { class: 'col-drop', hidden: true }));
+    }
+    const headers = [...drag.th.parentElement.querySelectorAll(':scope > th[data-col]')];
+    const boxes = headers.map((th) => th.getBoundingClientRect());
+    let index = boxes.findIndex((box) => e.clientX < box.left + box.width / 2);
+    if (index === -1) index = headers.length;
+    const from = headers.indexOf(drag.th);
+    if (index === from || index === from + 1) {
+      drag.before = undefined;
+      drag.marker.hidden = true;
+      return;
+    }
+    drag.before = index < headers.length ? headers[index].getAttribute('data-col') : null;
+    const pane = app.querySelector('.content').getBoundingClientRect();
+    const edge = index < headers.length ? boxes[index].left : boxes[headers.length - 1].right;
+    const top = boxes[from].top;
+    drag.marker.hidden = false;
+    drag.marker.style.left = `${Math.round(Math.min(Math.max(edge, pane.left), pane.right)) - 1}px`;
+    drag.marker.style.top = `${top}px`;
+    drag.marker.style.height = `${pane.bottom - top}px`;
+  }
+
+  function endColumnDrag(e) {
+    const drag = columnDrag;
+    columnDrag = null;
+    document.removeEventListener('pointermove', onColumnDragMove, true);
+    document.removeEventListener('pointerup', endColumnDrag, true);
+    document.removeEventListener('pointercancel', endColumnDrag, true);
+    if (!drag || !drag.active) return;
+    drag.th.classList.remove('col-dragging');
+    document.body.classList.remove('col-moving');
+    drag.marker.remove();
+    if (e.type !== 'pointerup') return;
+    // The release would otherwise arrive as a click on a header and sort by it.
+    swallowNextClick();
+    const kind = kindOf(state.active);
+    // A rebuild mid-drag — a kind switch, the window crossing the breakpoint —
+    // leaves the header that was picked up detached, and its column may be gone.
+    if (drag.before === undefined || !kind || !drag.th.isConnected) return;
+    moveColumn(kind, drag.key, drag.before);
+  }
+
+  /** A column edge being dragged, or null. `width` stays null until the pointer moves. */
+  let columnResize = null;
+
+  function startColumnResize(e, key) {
+    if (e.button !== 0) return;
+    // A press on the handle neither picks the column up nor, on release, sorts.
+    e.stopPropagation();
+    e.preventDefault();
+    const th = e.currentTarget.closest('th');
+    columnResize = { key, startX: e.clientX, startWidth: th.getBoundingClientRect().width, width: null, frame: 0 };
+    document.body.classList.add('col-resizing');
+    document.addEventListener('pointermove', onColumnResizeMove, true);
+    document.addEventListener('pointerup', endColumnResize, true);
+    document.addEventListener('pointercancel', endColumnResize, true);
+  }
+
+  function onColumnResizeMove(e) {
+    const resize = columnResize;
+    if (!resize) return;
+    if (!(e.buttons & 1)) {
+      endColumnResize(e);
+      return;
+    }
+    resize.width = Math.max(MIN_COLUMN_PX, Math.round(resize.startWidth + e.clientX - resize.startX));
+    // One refit a frame, however often the pointer reports.
+    if (!resize.frame) {
+      resize.frame = requestAnimationFrame(() => {
+        resize.frame = 0;
+        if (columnResize === resize) fitTable({ [resize.key]: resize.width });
+      });
+    }
+  }
+
+  function endColumnResize(e) {
+    const resize = columnResize;
+    columnResize = null;
+    document.removeEventListener('pointermove', onColumnResizeMove, true);
+    document.removeEventListener('pointerup', endColumnResize, true);
+    document.removeEventListener('pointercancel', endColumnResize, true);
+    document.body.classList.remove('col-resizing');
+    if (!resize) return;
+    cancelAnimationFrame(resize.frame);
+    if (e.type === 'pointerup') swallowNextClick();
+    const kind = kindOf(state.active);
+    // Pressed and let go without moving: the first half of a double-click, or nothing.
+    if (resize.width === null || !kind || e.type !== 'pointerup') {
+      fitTable();
+      return;
+    }
+    const layout = columnLayout(kind.id);
+    saveColumnLayout(kind.id, { ...layout, widths: { ...layout.widths, [resize.key]: resize.width } });
+    fitTable();
+  }
+
+  /**
+   * The header's context menu, and the toolbar's Columns button: every column
+   * the table can show, ticked if it is, plus a way back to the defaults. On a
+   * header it leads with what can be done to that column alone.
+   */
+  function openColumnMenu(point, key, anchor) {
+    closeRowMenu();
+    const kind = kindOf(state.active);
+    if (!kind) return;
+    const layout = columnLayout(kind.id);
+    const col = key ? kind.columns.find((c) => c.key === key) : null;
+    const items = [];
+    if (col) {
+      const isName = col.key === 'name';
+      items.push({
+        label: `Hide ${col.label}`,
+        disabled: isName,
+        title: isName ? 'Rows are told apart by their name, so it always stays' : undefined,
+        run: () => setColumnShown(kind, col.key, false)
+      });
+      items.push({
+        label: 'Reset width',
+        disabled: layout.widths?.[col.key] === undefined,
+        title: 'Size the column to its content again, as double-clicking its edge does',
+        run: () => resetColumnWidth(kind, col.key)
+      });
+      items.push(null);
+    }
+    for (const c of availableColumns(kind)) {
+      const shown = columnShown(kind, c);
+      items.push({
+        label: c.label,
+        checked: shown,
+        disabled: c.key === 'name',
+        run: () => setColumnShown(kind, c.key, !shown)
+      });
+    }
+    items.push(null);
+    items.push({
+      label: 'Reset columns',
+      disabled: !state.columnLayouts[kind.id],
+      title: `Put the ${kind.label.toLowerCase()} table's columns back to their original order, widths and set`,
+      run: () => {
+        saveColumnLayout(kind.id, {});
+        renderContentOnly();
+        fitTable();
+      }
+    });
+    showMenu(items, point, { anchor, alignRight: Boolean(anchor) });
+  }
+
+  /**
+   * The toolbar's way into the column menu, for anyone who doesn't think to
+   * right-click a header — and for the keyboard, which can't.
+   */
+  function renderColumnsButton() {
+    const button = el('button', {
+      class: 'columns-button',
+      title: 'Columns',
+      'aria-label': 'Columns',
+      'aria-haspopup': 'menu',
+      onclick: () => {
+        // A second click on the button closes the menu it opened.
+        if (rowMenu && rowMenu.anchor === button) {
+          closeRowMenu();
+          return;
+        }
+        const box = button.getBoundingClientRect();
+        openColumnMenu({ x: box.right, y: box.bottom + 4 }, null, button);
+      }
+    }, columnsMark());
+    return button;
+  }
+
+  /** A frame split into three: the usual glyph for choosing columns. */
+  function columnsMark() {
+    const mark = svg('svg', { class: 'columns-mark', viewBox: '0 0 16 16', 'aria-hidden': 'true' });
+    const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.4' };
+    mark.appendChild(svg('rect', { x: '1.7', y: '2.7', width: '12.6', height: '10.6', rx: '1.5', ...stroke }));
+    mark.appendChild(svg('path', { d: 'M6 2.7v10.6M10 2.7v10.6', ...stroke }));
+    return mark;
   }
 
   /** The kind's column for a key, when it is one of the usage columns. */
@@ -3220,50 +3759,98 @@
     });
     selectAll.indeterminate = checkedHere > 0 && checkedHere < rows.length;
 
+    // Anywhere along the header opens the column menu, not just on a column:
+    // the space past the last one is where a hidden column would come back.
+    const columnMenu = (e) => {
+      e.preventDefault();
+      openColumnMenu({ x: e.clientX, y: e.clientY }, null);
+    };
     const head = el('tr', {},
       // Sorting is bound to a th's click; this one holds a control instead, so
       // it deliberately carries no sort handler.
-      el('th', { class: 'check' }, selectAll),
-      ...columns.map((col) => {
-        const active = state.sort.key === col.key;
-        return el('th', {
-          class: [
-            col.secondary ? 'secondary' : '',
-            col.numeric ? 'numeric' : '',
-            col.key === 'message' ? 'message' : ''
-          ].filter(Boolean).join(' '),
-          onclick: () => {
-            // `state.sort` is read here rather than through the `active` above:
-            // the header survives refreshes now, so a flag captured when it was
-            // built would describe an older sort than the one being toggled.
-            const on = state.sort.key === col.key;
-            // Usage is sorted to find the heaviest, so its first click puts
-            // the top consumers at the top.
-            state.sort = on ? { key: col.key, dir: -state.sort.dir } : { key: col.key, dir: col.metric ? -1 : 1 };
-            renderContentOnly();
-          }
-        }, col.label, active ? el('span', { class: 'arrow', text: state.sort.dir > 0 ? ' ▲' : ' ▼' }) : null);
-      })
+      el('th', { class: 'check', oncontextmenu: columnMenu }, selectAll),
+      ...columns.map((col) => headerCell(col, false)),
+      el('th', { class: 'fill', oncontextmenu: columnMenu })
     );
 
     const body = rows.map((row, index) => buildRow(row, index, rows, columns));
 
     // The message spans every column so it sits under the whole header rather
-    // than squeezing into the first one. +1 covers the checkbox column, which
-    // precedes the kind's own.
+    // than squeezing into the first one. +2 covers the checkbox column, which
+    // precedes the kind's own, and the filler after them.
     const tbody = empty
       ? el('tbody', {}, el('tr', { class: 'empty-row' },
-          el('td', { class: 'empty-cell', colspan: String(columns.length + 1) }, empty)
+          el('td', { class: 'empty-cell', colspan: String(columns.length + 2) }, empty)
         ))
       : el('tbody', {}, ...body);
+
+    // Widths are set on these by `fitTable` once the table is on screen; see
+    // the stylesheet for why the layout is fixed rather than worked out from
+    // the cells.
+    const colgroup = el('colgroup', {},
+      el('col', { class: 'check' }),
+      ...columns.map((col) => el('col', { 'data-col': col.key })),
+      el('col', { class: 'fill' })
+    );
 
     // Stamped so a later repaint can tell whether the table on screen is the
     // same shape as the one being drawn now. A kind switch changes the columns
     // under the same `.content`, and reconciling one kind's rows into another's
     // would keep the old header's cells; comparing this rules that out cheaply.
-    const table = el('table', { 'data-kind': state.active, 'data-cols': columnSignature(columns) },
-      el('thead', {}, head), tbody);
+    const table = el('table', { class: 'grid', 'data-kind': state.active, 'data-cols': columnSignature(columns) },
+      colgroup, el('thead', {}, head), tbody);
     return table;
+  }
+
+  /**
+   * A column's header: its label and sort arrow, and the handle along its
+   * right edge that resizes it. Clicking sorts, dragging moves the column, and
+   * the context menu offers the rest — hiding it, resetting its width, and the
+   * list of every column the table can show.
+   *
+   * `arrow` forces the sort arrow on, for the hidden copy `measureColumns`
+   * sizes the columns from.
+   */
+  function headerCell(col, arrow) {
+    const active = arrow || state.sort.key === col.key;
+    const th = el('th', {
+      class: [
+        col.numeric ? 'numeric' : '',
+        col.key === 'message' ? 'message' : ''
+      ].filter(Boolean).join(' '),
+      'data-col': col.key,
+      onclick: () => {
+        // `state.sort` is read here rather than through `active` above: the
+        // header survives refreshes now, so a flag captured when it was built
+        // would describe an older sort than the one being toggled.
+        const on = state.sort.key === col.key;
+        // Usage is sorted to find the heaviest, so its first click puts the
+        // top consumers at the top.
+        state.sort = on ? { key: col.key, dir: -state.sort.dir } : { key: col.key, dir: col.metric ? -1 : 1 };
+        renderContentOnly();
+      },
+      oncontextmenu: (e) => {
+        e.preventDefault();
+        openColumnMenu({ x: e.clientX, y: e.clientY }, col.key);
+      },
+      onpointerdown: (e) => startColumnDrag(e, col.key)
+    },
+      el('span', { class: 'th-label', text: col.label }),
+      active ? el('span', { class: 'arrow', text: state.sort.dir > 0 ? ' ▲' : ' ▼' }) : null,
+      el('span', {
+        class: 'col-resize',
+        title: 'Drag to resize. Double-click to fit.',
+        onpointerdown: (e) => startColumnResize(e, col.key),
+        // A press on the handle is never a sort.
+        onclick: (e) => e.stopPropagation(),
+        ondblclick: (e) => {
+          e.stopPropagation();
+          const kind = kindOf(state.active);
+          if (kind) resetColumnWidth(kind, col.key);
+        }
+      })
+    );
+    return th;
   }
 
   /**
@@ -3350,7 +3937,6 @@
         ...columns.map((col) => {
           const value = cellValue(row, col.key);
           const classes = [
-            col.secondary ? 'secondary' : '',
             col.numeric ? 'numeric' : '',
             col.key === 'name' ? 'name' : '',
             col.key === 'message' ? 'message' : ''
@@ -3373,12 +3959,14 @@
             }, value);
           }
           return el('td', { class: classes, title: value, 'data-col': col.key }, value);
-        })
+        }),
+        el('td', { class: 'fill' })
       );
       // Snapshotted once, here, where the row's shape is known: the cells are
-      // in column order after the checkbox cell, and nothing reorders them
-      // afterwards — a row whose columns change is rebuilt, not updated.
-      live.cells = Array.prototype.slice.call(tr.children, 1);
+      // in column order between the checkbox cell and the filler, and nothing
+      // reorders them afterwards — a row whose columns change is rebuilt, not
+      // updated.
+      live.cells = Array.prototype.slice.call(tr.children, 1, 1 + columns.length);
       live.check = check;
       rowState.set(tr, live);
       return tr;
@@ -4366,7 +4954,10 @@
     return actions;
   }
 
-  /** The row context menu on screen, if any. */
+  /**
+   * The context menu on screen, if any: a row's, or the column menu, which
+   * shares its look, its keys and its ways of being dismissed.
+   */
   let rowMenu = null;
 
   /**
@@ -4378,20 +4969,40 @@
   function openRowMenu(event, tr, row) {
     closeRowMenu();
     const kind = kindOf(state.active);
-    const run = (fn) => () => { closeRowMenu(); fn(); };
     // Right-clicking one of several ticked rows acts on all of them, as in a
     // file explorer, so only what the action bar can do to the lot is offered.
     // A row outside the selection, or a selection of one, gets its own menu.
     const ticked = isChecked(row) ? checkedRows() : [];
     const bulk = ticked.length > 1;
     const items = bulk ? bulkMenuItems(kind, ticked) : rowMenuItems(kind, row);
+    // Held by key rather than by node: a refresh rewrites each row's classes
+    // from state, and may rebuild the row outright, so the outline has to be
+    // something the row renderers can ask about. A bulk menu outlines nothing;
+    // the ticks already show what it acts on.
+    showMenu(items, { x: event.clientX, y: event.clientY }, { key: bulk ? null : rowKey(row) });
+    if (!bulk) tr.classList.add('menu-open');
+  }
+
+  /**
+   * Opens a menu of `items` at `point`, flipped back inside the viewport when
+   * it would run off the right or bottom edge. A null item is a separator, and
+   * an item with `checked` is a toggle drawn with a tick. `anchor` is the
+   * button that opened it, if one did, which a press on does not count as a
+   * press outside; `alignRight` hangs the menu left of the point, under the
+   * right edge of that button.
+   */
+  function showMenu(items, point, { key = null, anchor = null, alignRight = false } = {}) {
+    const run = (fn) => () => { closeRowMenu(); fn(); };
     const buttons = [];
-    const menu = el('div', { class: 'row-menu', role: 'menu' },
+    const checks = items.some((item) => item && item.checked !== undefined);
+    const menu = el('div', { class: 'row-menu' + (checks ? ' has-checks' : ''), role: 'menu' },
       ...items.map((item) => {
         if (!item) return el('div', { class: 'separator', role: 'separator' });
+        const checkable = item.checked !== undefined;
         const button = el('button', {
           class: item.variant === 'danger' ? 'danger' : '',
-          role: 'menuitem',
+          role: checkable ? 'menuitemcheckbox' : 'menuitem',
+          'aria-checked': checkable ? String(item.checked) : undefined,
           disabled: item.disabled,
           title: item.title,
           onclick: run(item.run)
@@ -4402,22 +5013,15 @@
     );
     document.body.appendChild(menu);
 
-    // Opened at the pointer, and flipped back inside the viewport when it
-    // would run off the right or bottom edge.
     const box = menu.getBoundingClientRect();
-    const x = Math.min(event.clientX, window.innerWidth - box.width - 4);
-    const y = event.clientY + box.height > window.innerHeight
-      ? Math.max(4, event.clientY - box.height)
-      : event.clientY;
+    const left = alignRight ? point.x - box.width : point.x;
+    const x = Math.min(left, window.innerWidth - box.width - 4);
+    const y = point.y + box.height > window.innerHeight
+      ? Math.max(4, point.y - box.height)
+      : point.y;
     menu.style.left = `${Math.max(4, x)}px`;
     menu.style.top = `${y}px`;
-
-    // Held by key rather than by node: a refresh rewrites each row's classes
-    // from state, and may rebuild the row outright, so the outline has to be
-    // something the row renderers can ask about. A bulk menu outlines nothing;
-    // the ticks already show what it acts on.
-    rowMenu = { menu, key: bulk ? null : rowKey(row), buttons };
-    if (!bulk) tr.classList.add('menu-open');
+    rowMenu = { menu, key, buttons, anchor };
   }
 
   /**
@@ -4498,7 +5102,11 @@
   // Anything that moves the ground under the menu dismisses it: a press
   // anywhere else, a scroll, or the panel losing focus or size.
   document.addEventListener('mousedown', (e) => {
-    if (rowMenu && !rowMenu.menu.contains(e.target)) closeRowMenu();
+    if (!rowMenu || rowMenu.menu.contains(e.target)) return;
+    // The button that opened it closes it again on its own click, which this
+    // would otherwise beat to it — and the click would then reopen it.
+    if (rowMenu.anchor && rowMenu.anchor.contains(e.target)) return;
+    closeRowMenu();
   }, true);
   document.addEventListener('scroll', () => closeRowMenu(), true);
   window.addEventListener('blur', () => closeRowMenu());
@@ -5129,9 +5737,18 @@
         state.railCollapsed = Boolean(message.railCollapsed);
         document.body.classList.toggle('rail-collapsed', state.railCollapsed);
         state.railGroups = message.railGroups || {};
+        state.columnLayouts = message.columnLayouts || {};
         state.dragToSelect = Boolean(message.dragToSelect);
         state.allowSecretReveal = message.allowSecretReveal !== false;
         render();
+        break;
+      case 'columnLayouts':
+        // Rearranged in another dashboard. The columns may differ, which the
+        // reconciler turns into a rebuild; if only widths moved, the table on
+        // screen is refitted where it stands.
+        state.columnLayouts = message.layouts || {};
+        renderContentOnly();
+        fitTable();
         break;
       case 'allowSecretReveal':
         state.allowSecretReveal = Boolean(message.enabled);

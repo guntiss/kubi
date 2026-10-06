@@ -59,8 +59,8 @@ hand to a coding agent with the whole thing in view.
   grouped by reason. A cluster whose events have all expired past their TTL says
   so rather than claiming all is well.
 
-- **Resource tables** — sortable, filterable tables with columns matched to each
-  kind, and status pills colored by health. The rail groups them into sections
+- **Resource tables** — compact, sortable, filterable tables with columns
+  matched to each kind, and statuses colored by health. The rail groups them into sections
   that fold away; only Workloads and Cluster start open, and the rail remembers
   what you open or fold:
 
@@ -82,6 +82,14 @@ hand to a coding agent with the whole thing in view.
   ticks, **Shift** adds to them and **Ctrl**/**Cmd** flips the rows it covers.
   Dragging is experimental; turn it off with `kubi.dragToSelect`.
   **Ctrl**/**Cmd**+**A** ticks every row shown.
+
+  Columns size themselves to their content and to the pane: when a table is
+  too wide, the long text columns (node names, messages) give way before
+  anything scrolls sideways. Drag a header's edge to resize it, and double-click
+  the edge to fit it to its content again. Drag a header to move the column.
+  Right-click a header, or use the **Columns** button in the toolbar, to hide or
+  show columns or put a table back to its defaults. Each table remembers its
+  layout, in every dashboard.
 
 - **Detail drawer** — select a row for its fields plus actions: Describe, YAML,
   Logs, Shell, Pods, Port forward, Scale, Restart, Delete. Scale is offered on Deployments,
@@ -152,8 +160,8 @@ together.
 
 ### Filtering
 
-Every table has a filter row: a namespace picker, a status picker, and a query
-box. They combine, and `✕ Clear` resets all three, plus the pod scope.
+Every table has filters beside its title: a namespace picker, a status picker,
+and a query box. They combine, and `✕ Clear` resets all three, plus the pod scope.
 
 The namespace picker filters as you type: open it, or just start typing while
 it has focus, then pick with the arrow keys and `Enter`. Names starting with
