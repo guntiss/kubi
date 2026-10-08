@@ -1,5 +1,5 @@
 :root {
-  --rail-width: 190px;
+  --rail-width: 180px;
   --radius: 6px;
   --ok: var(--vscode-charts-green, #89d185);
   --warn: var(--vscode-charts-yellow, #cca700);
