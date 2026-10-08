@@ -1,5 +1,5 @@
 :root {
-  --rail-width: 168px;
+  --rail-width: 196px;
   --radius: 6px;
   --ok: var(--vscode-charts-green, #89d185);
   --warn: var(--vscode-charts-yellow, #cca700);
@@ -88,6 +88,7 @@ button { user-select: none; }
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  padding-top: 8px;
 }
 
 /*
@@ -102,10 +103,10 @@ button { user-select: none; }
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  margin: 6px 0;
-  padding: 10px 10px 6px;
+  margin: 6px 0 8px;
+  padding: 10px 14px 8px;
   font-weight: 600;
   font-size: 1.05em;
   letter-spacing: 0.02em;
@@ -134,8 +135,8 @@ button.brand:hover .chevron { color: var(--vscode-foreground); }
  * theme; `flex: none` keeps it square when the name beside it is long.
  */
 .brand .mark {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex: none;
   color: var(--vscode-charts-blue, #4a9eff);
 }
@@ -189,15 +190,16 @@ button.brand:hover .chevron { color: var(--vscode-foreground); }
  * The rule beneath it closes off the pinned header from the list that scrolls.
  */
 .rail-jump-row {
-  padding: 0 8px 10px;
+  padding: 0 10px 12px;
   border-bottom: 1px solid var(--border);
 }
 button.rail-jump {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 6px 4px 8px;
+  gap: 8px;
+  padding: 5px 7px 5px 10px;
+  border-radius: var(--radius);
   background: var(--vscode-input-background);
   color: var(--vscode-input-placeholderForeground, var(--muted));
   border: 1px solid var(--vscode-input-border, var(--border));
@@ -206,7 +208,7 @@ button.rail-jump {
 button.rail-jump:hover { background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
 button.rail-jump:focus,
 button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; }
-.rail-jump .glyph { width: 13px; height: 13px; flex: none; }
+.rail-jump .glyph { width: 14px; height: 14px; flex: none; }
 .rail-jump .label-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The shortcut, as a keycap. Also used inside the collapsed strip's flyout. */
@@ -235,7 +237,7 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 10px 10px 4px 12px;
+  padding: 16px 14px 6px 16px;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -280,22 +282,49 @@ button.rail-jump.open { border-color: var(--vscode-focusBorder); outline: none; 
 /* Folded over the page on screen: the heading is lit, and the item stays. */
 .rail-group.holds-active { color: var(--vscode-foreground); }
 
+/*
+ * Each entry is a rounded pill inset from the rail's edges, with room above
+ * and below its label. The page on screen is filled and carries a short bar
+ * at the rail's edge, standing in for the full-height border it used to have.
+ */
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
+  gap: 10px;
+  min-height: 30px;
+  margin: 1px 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius);
   cursor: pointer;
-  border-left: 2px solid transparent;
 }
 .nav-item:hover { background: var(--vscode-list-hoverBackground); }
 .nav-item.active {
   background: var(--vscode-list-activeSelectionBackground);
   color: var(--vscode-list-activeSelectionForeground);
-  border-left-color: var(--vscode-focusBorder);
 }
-.nav-item .glyph { width: 14px; text-align: center; flex: none; opacity: 0.85; }
-.nav-item .gear-mark { height: 14px; }
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--vscode-focusBorder);
+}
+/* Quieter than the label until the entry is pointed at or open. */
+.nav-item .glyph {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  opacity: 0.7;
+  transition: opacity 0.12s ease;
+}
+.nav-item:hover .glyph,
+.nav-item.active .glyph { opacity: 1; }
+/* The boot shell's stand-in for an icon, before the script draws the real one. */
+span.glyph { display: inline-block; border-radius: 4px; background: var(--vscode-list-hoverBackground); }
 /* Names are the API's plurals, and a larger font can still push one past the
    rail's edge, where it is cut rather than wrapped. */
 .nav-item .label-text {
@@ -340,7 +369,7 @@ button.rail-add:focus-visible { outline: 1px solid var(--vscode-focusBorder); ou
   /* Its overflow clip would otherwise let the column squeeze it to its
      padding once the list outgrows the rail. */
   flex: none;
-  padding: 8px 10px 2px 12px;
+  padding: 12px 14px 4px 16px;
   font-size: 0.72em;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -772,7 +801,7 @@ button.ns-picker::after {
 /* Go to's entries: the rail's glyph, the name, and the section it is under. */
 .kind-menu .pick-option { gap: 8px; }
 .kind-menu .pick-option::before { margin-right: 0; }
-.pick-glyph { flex: none; width: 14px; text-align: center; opacity: 0.85; }
+.pick-glyph { flex: none; width: 15px; height: 15px; opacity: 0.8; }
 .pick-hint { padding-left: 12px; font-size: 0.9em; opacity: 0.6; }
 
 /*
@@ -2040,7 +2069,7 @@ tbody td.empty-cell .state { padding: 40px 20px; }
  * glyphs clickable while collapsed; only the words go away.
  */
 body.rail-collapsed {
-  --rail-width: 48px;
+  --rail-width: 52px;
 }
 body.rail-collapsed .label-text,
 body.rail-collapsed .rail-subhead,
@@ -2055,21 +2084,25 @@ body.rail-collapsed .brand .name {
 }
 body.rail-collapsed .nav-item {
   justify-content: center;
-  padding: 8px 0;
+  min-height: 34px;
+  margin: 2px 7px;
+  padding: 0;
 }
+body.rail-collapsed .nav-item.active::before { left: -7px; }
+body.rail-collapsed .nav-item .glyph { width: 18px; height: 18px; }
 /* Go to shrinks to its magnifier, a glyph like the rest of the strip. */
-body.rail-collapsed .rail-jump-row { padding: 0 0 6px; }
+body.rail-collapsed .rail-jump-row { padding: 0 7px 8px; }
 body.rail-collapsed button.rail-jump {
   justify-content: center;
-  padding: 7px 0;
+  min-height: 34px;
+  padding: 0;
   background: transparent;
   border: none;
-  border-radius: 0;
   color: inherit;
 }
 body.rail-collapsed button.rail-jump:hover,
 body.rail-collapsed button.rail-jump.open { background: var(--vscode-list-hoverBackground); }
-body.rail-collapsed .rail-jump .glyph { width: 15px; height: 15px; }
+body.rail-collapsed .rail-jump .glyph { width: 17px; height: 17px; }
 body.rail-collapsed button.rail-jump:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 /*
  * The whole strip width is the expand target. It used to be a small button
@@ -2081,7 +2114,7 @@ body.rail-collapsed .brand {
   padding: 8px 0 6px;
 }
 /* A slightly larger mark, now that it is the only thing in the row. */
-body.rail-collapsed .brand .mark { width: 20px; height: 20px; }
+body.rail-collapsed .brand .mark { width: 22px; height: 22px; }
 /*
  * The flyouts are `position: fixed` and so escape this scroller on their own;
  * the overflow no longer has to be opened up to let them out. See `.flyout`.
@@ -2097,7 +2130,8 @@ body.rail-collapsed .rail-scroll { overflow-y: auto; }
 body.rail-collapsed .rail-group {
   justify-content: center;
   gap: 4px;
-  padding: 6px 8px;
+  margin-top: 6px;
+  padding: 8px 8px;
 }
 body.rail-collapsed .rail-group::before,
 body.rail-collapsed .rail-group::after {
@@ -2116,8 +2150,8 @@ body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackg
  * container, so an empty growing element is what separates "resources" from
  * the footer without needing a fixed height anywhere.
  */
-.rail-spacer { flex: 1 1 auto; min-height: 12px; }
-.rail-footer { border-top: 1px solid var(--border); padding-top: 4px; }
+.rail-spacer { flex: 1 1 auto; min-height: 16px; }
+.rail-footer { border-top: 1px solid var(--border); padding: 6px 0 8px; }
 
 .about {
   padding: 16px;

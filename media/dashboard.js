@@ -777,7 +777,7 @@
     // Collapsed, the label is hidden, so hovering a glyph flies the same text
     // out beside the rail. A CSS flyout rather than the native tooltip: no
     // delay before it appears, and it matches the rail's styling.
-    const navItem = (id, label, glyph, onclick = () => select(id)) => el('div', {
+    const navItem = (id, label, onclick = () => select(id)) => el('div', {
       class: 'nav-item' + (state.active === id ? ' active' : ''),
       onclick,
       // The flyout is `position: fixed`, so it has to be told where its item
@@ -786,7 +786,7 @@
       onmouseenter: collapsed ? placeFlyout : null,
       onmouseleave: collapsed ? hideFlyout : null
     },
-      typeof glyph === 'string' ? el('span', { class: 'glyph', text: glyph }) : glyph,
+      icon(id),
       el('span', { class: 'label-text', text: label }),
       collapsed ? el('span', { class: 'flyout' }, label) : null
     );
@@ -795,7 +795,7 @@
     // rest wait under More, sorted by what they are for.
     const rest = moreKinds();
     const items = [
-      navItem('overview', 'Overview', '◈'),
+      navItem('overview', 'Overview'),
       ...railList().map((id) => kindNavItem(kindOf(id), true))
     ];
     if (rest.length) {
@@ -847,8 +847,8 @@
         // is not a page: it opens VS Code's own settings, narrowed to Kubi's.
         el('div', { class: 'rail-spacer' }),
         el('div', { class: 'rail-footer' },
-          navItem('about', 'About', 'ⓘ'),
-          navItem('settings', 'Settings', gearMark(), () => post({ type: 'openSettings' }))
+          navItem('about', 'About'),
+          navItem('settings', 'Settings', () => post({ type: 'openSettings' }))
         )
       )
     );
@@ -882,7 +882,7 @@
       onmouseenter: collapsed ? placeFlyout : null,
       onmouseleave: collapsed ? hideFlyout : null
     },
-      el('span', { class: 'glyph', text: glyph(id) }),
+      icon(id),
       el('span', { class: 'label-text', text: name }),
       !kept && !collapsed ? el('button', {
         class: 'rail-add',
@@ -1192,46 +1192,6 @@
     );
   }
 
-  /**
-   * A gear for the rail's Settings item, drawn for the reason the refresh mark
-   * is: `⚙` comes out at whatever size the theme's font gives it, which beside
-   * About's `ⓘ` was a speck.
-   */
-  function gearMark() {
-    const ns = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(ns, 'svg');
-    svg.setAttribute('class', 'glyph gear-mark');
-    svg.setAttribute('viewBox', '0 0 16 16');
-    svg.setAttribute('aria-hidden', 'true');
-    // A ring and a hub at the weight the magnifier and refresh arrow use, and
-    // eight square-ended teeth on the ring. Teeth any thinner than the ring
-    // read as rays, and the gear as a sun.
-    const ring = document.createElementNS(ns, 'circle');
-    ring.setAttribute('cx', '8');
-    ring.setAttribute('cy', '8');
-    ring.setAttribute('r', '4.3');
-    const hub = document.createElementNS(ns, 'circle');
-    hub.setAttribute('cx', '8');
-    hub.setAttribute('cy', '8');
-    hub.setAttribute('r', '1.7');
-    const teeth = document.createElementNS(ns, 'path');
-    let d = '';
-    for (let i = 0; i < 8; i++) {
-      const a = (i * Math.PI) / 4;
-      const x = (r) => (8 + r * Math.cos(a)).toFixed(2);
-      const y = (r) => (8 + r * Math.sin(a)).toFixed(2);
-      d += `M${x(4.6)} ${y(4.6)}L${x(6.5)} ${y(6.5)}`;
-    }
-    teeth.setAttribute('d', d);
-    for (const node of [ring, hub, teeth]) {
-      node.setAttribute('fill', 'none');
-      node.setAttribute('stroke', 'currentColor');
-      node.setAttribute('stroke-width', node === teeth ? '2.3' : '1.6');
-      svg.appendChild(node);
-    }
-    return svg;
-  }
-
   /** The + on a More entry, drawn rather than typed for the gear's reason: a `+` is a speck at rail size. */
   function plusMark() {
     const ns = 'http://www.w3.org/2000/svg';
@@ -1380,48 +1340,98 @@
     if (!e.relatedTarget) setBrandVisit(false);
   });
 
-  function glyph(id) {
-    return GLYPHS[id] || '•';
+  /**
+   * A page's icon, drawn as a stroked SVG in `currentColor` so it takes the
+   * theme's foreground like text would, and comes out at the same size and
+   * weight on every font — which the characters the rail used to print did
+   * not, some filling their box and others shrinking to a speck. `className`
+   * is the box it sits in: the rail's `glyph`, or Go to's `pick-glyph`.
+   */
+  function icon(id, className = 'glyph') {
+    const node = svg('svg', {
+      class: `${className} icon`,
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': '1.8',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      'aria-hidden': 'true'
+    });
+    node.innerHTML = ICONS[id] || ICONS.fallback;
+    return node;
   }
 
   /**
-   * One glyph per kind. Text rather than icon files: the rail renders inside a
-   * webview with a strict CSP, and a character inherits the theme's foreground
-   * colour for free where an SVG would need a palette per theme.
+   * One icon per page, on a 24-unit grid. Most are drawn after Lucide
+   * (https://lucide.dev, ISC License, Copyright (c) Lucide Contributors),
+   * picked for what the kind does rather than what its name sounds like: a
+   * DaemonSet is the ghost on every node, a ServiceAccount the robot.
    */
-  const GLYPHS = {
-    nodes: '▣',
-    namespaces: '◱',
-    events: '❢',
-    pods: '◉',
-    deployments: '◳',
-    statefulsets: '◫',
-    daemonsets: '▤',
-    replicasets: '◰',
-    jobs: '▸',
-    cronjobs: '◴',
-    horizontalpodautoscalers: '↕',
-    services: '⇄',
-    ingresses: '⌘',
-    endpoints: '⚭',
-    networkpolicies: '⬡',
-    configmaps: '☰',
-    secrets: '✱',
-    serviceaccounts: '☺',
-    resourcequotas: '◔',
-    limitranges: '↕',
-    persistentvolumeclaims: '◧',
-    persistentvolumes: '■',
-    storageclasses: '≡',
-    poddisruptionbudgets: '⊘',
-    priorityclasses: '⇧',
-    ingressclasses: '⌗',
-    validatingwebhookconfigurations: '✓',
-    mutatingwebhookconfigurations: '✎',
-    roles: '⚑',
-    rolebindings: '⊶',
-    clusterroles: '⚐',
-    clusterrolebindings: '⊷'
+  const ICONS = {
+    fallback: '<circle cx="12" cy="12" r="3"/>',
+    overview: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/>'
+      + '<rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+    about: '<circle cx="12" cy="12" r="9.5"/><path d="M12 16.5v-5"/><path d="M12 7.5h.01"/>',
+    settings: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73'
+      + 'l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38'
+      + 'a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18'
+      + 'a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08'
+      + 'a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08'
+      + 'a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+    nodes: '<rect x="2.5" y="3" width="19" height="7.5" rx="2"/><rect x="2.5" y="13.5" width="19" height="7.5" rx="2"/>'
+      + '<path d="M6.5 6.75h.01"/><path d="M6.5 17.25h.01"/><path d="M10 6.75h.01"/><path d="M10 17.25h.01"/>',
+    namespaces: '<path d="M7 3H5a2 2 0 0 0-2 2v2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/>'
+      + '<path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="8" y="8" width="8" height="8" rx="1.5"/>',
+    events: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+    pods: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4'
+      + 'A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
+    deployments: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/>'
+      + '<path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>'
+      + '<path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>',
+    statefulsets: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
+    daemonsets: '<path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/>'
+      + '<path d="M9 10h.01"/><path d="M15 10h.01"/>',
+    replicasets: '<rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+    jobs: '<circle cx="12" cy="12" r="9.5"/><path d="M10 8.5v7l5.5-3.5z"/>',
+    cronjobs: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/>',
+    horizontalpodautoscalers: '<path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/>',
+    services: '<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/>'
+      + '<rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>',
+    ingresses: '<circle cx="12" cy="12" r="9.5"/><path d="M12 2.5a14.5 14.5 0 0 0 0 19 14.5 14.5 0 0 0 0-19"/><path d="M2.5 12h19"/>',
+    endpoints: '<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>',
+    networkpolicies: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    configmaps: '<path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/>'
+      + '<path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/>',
+    secrets: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    serviceaccounts: '<path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/>'
+      + '<path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+    resourcequotas: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+    limitranges: '<path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6'
+      + 'a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/>'
+      + '<path d="m17.5 15.5 2-2"/>',
+    persistentvolumeclaims: '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5'
+      + 'a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
+    persistentvolumes: '<path d="M22 12H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89'
+      + 'A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M6 16h.01"/><path d="M10 16h.01"/>',
+    storageclasses: '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9'
+      + 'a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/>'
+      + '<path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
+    poddisruptionbudgets: '<path d="M22 12a10 10 0 0 0-20 0Z"/><path d="M12 12v8a2 2 0 0 0 4 0"/><path d="M12 2v1"/>',
+    priorityclasses: '<path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/>',
+    ingressclasses: '<path d="M12 13v8"/><path d="M12 3v3"/><path d="M4 6a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h13'
+      + 'a2 2 0 0 0 1.15-.37l3.43-2.31a1 1 0 0 0 0-1.64l-3.43-2.31A2 2 0 0 0 17 6z"/>',
+    validatingwebhookconfigurations: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m9 12 2 2 4-4"/>',
+    mutatingwebhookconfigurations: '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>'
+      + '<path d="M18.38 2.63a1 1 0 0 1 3 3l-9.02 9.01a2 2 0 0 1-.85.51l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87'
+      + 'a2 2 0 0 1 .51-.85z"/>',
+    roles: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+    rolebindings: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>'
+      + '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+    clusterroles: '<path d="M11.56 3.27a.5.5 0 0 1 .88 0l2.95 5.6a1 1 0 0 0 1.52.29l4.28-3.66a.5.5 0 0 1 .8.52l-2.83 10.25'
+      + 'a1 1 0 0 1-.96.73H5.81a1 1 0 0 1-.96-.73L2.02 6.02a.5.5 0 0 1 .8-.52l4.28 3.66a1 1 0 0 0 1.52-.29z"/>'
+      + '<path d="M5 21h14"/>',
+    clusterrolebindings: '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><path d="M8 12h8"/>'
   };
 
   /**
@@ -1710,21 +1720,20 @@
    * singular, the rail's short name and kubectl's short names.
    */
   function jumpTargets() {
-    const page = (id, label, glyphText) => ({ id, label, glyph: glyphText, group: '', words: [], singular: '' });
+    const page = (id, label) => ({ id, label, group: '', words: [], singular: '' });
     const target = (kind) => ({
       id: kind.id,
       label: kind.label,
-      glyph: glyph(kind.id),
       group: state.groups.find((g) => g.id === kind.group)?.label ?? '',
       words: [kind.id, kind.singular.toLowerCase(), ...(kind.short ? [kind.short.toLowerCase()] : []), ...(kind.aliases || [])],
       singular: kind.singular
     });
     const rest = moreKinds();
     return [
-      page('overview', 'Overview', '◈'),
+      page('overview', 'Overview'),
       ...railList().map((id) => target(kindOf(id))),
       ...state.groups.flatMap((group) => rest.filter((kind) => kind.group === group.id).map(target)),
-      page('about', 'About', 'ⓘ')
+      page('about', 'About')
     ];
   }
 
@@ -1864,7 +1873,7 @@
         onmousemove: () => { if (kindMenu.active !== id) setKindActive(id); },
         onclick: () => pickKind(id)
       },
-        el('span', { class: 'pick-glyph', text: target.glyph }),
+        icon(id, 'pick-glyph'),
         el('span', { class: 'pick-name' }, ...name),
         // What it is for, which is also the heading it sits under in More
         // when the rail does not keep it.

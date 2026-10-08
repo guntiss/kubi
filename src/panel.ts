@@ -2294,11 +2294,11 @@ export class DashboardPanel {
   private bootShell(): string {
     const bar = (width: string) => `<span class="sk-bar" style="width:${width}"></span>`;
     // Placeholder rail entries: the real ones are drawn by the script, which
-    // holds the glyphs. How many there are is known here, though — Overview
+    // holds the icons. How many there are is known here, though — Overview
     // and the kinds the user keeps — so the list does not grow or shrink as
     // the real one replaces it.
     const navRows = Array.from({ length: 1 + (this.railKinds() ?? RAIL_DEFAULT).length }, () =>
-      `<div class="nav-item"><span class="glyph">•</span>${bar('62%')}</div>`
+      `<div class="nav-item"><span class="glyph"></span>${bar('62%')}</div>`
     ).join('');
     return `<div class="rail">`
       + `<button class="brand">${BRAND_MARK}<span class="name">Kubi</span>`
