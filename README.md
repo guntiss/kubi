@@ -5,7 +5,12 @@
 [![CI](https://github.com/guntiss/kubi/actions/workflows/ci.yml/badge.svg)](https://github.com/guntiss/kubi/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Manage Kubernetes clusters in VS Code at lightning speed.**
+**Manage Kubernetes clusters in VS Code at lightning speed — in a dashboard you
+make your own.**
+
+Keep only the resource kinds you use, in the order you want them. Arrange each
+table's columns, hide the ones you never read, and add columns of your own from
+any label. Kubi remembers all of it.
 
 To get started, run this in your terminal: `code --install-extension guntiss.kubi`
 
@@ -18,6 +23,9 @@ To get started, run this in your terminal: `code --install-extension guntiss.kub
 | <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/shell-terminal.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/shell-terminal.png" width="400" alt="A pod's logs and a shell open side by side in VS Code's terminal"></a><br>**Logs and shell** — right in VS Code's terminal. | <a href="https://raw.githubusercontent.com/guntiss/kubi/main/docs/delete.png"><img src="https://raw.githubusercontent.com/guntiss/kubi/main/docs/delete.png" width="400" alt="Four selected pods and the confirmation dialog for deleting them"></a><br>**Bulk actions** — select rows, act on them at once. |
 
 ## Why Kubi
+
+**Fully customizable.** Keep only the kinds you use, lay out each table your way, and
+add columns from labels. See [Make it yours](#make-it-yours).
 
 **Works out of the box.** All you need is VS Code and `kubectl` with your
 existing kubeconfig. Cloud SSO works too.
@@ -51,6 +59,40 @@ across seven files, with no runtime dependencies and no build step beyond `tsc`.
 It is easy to read end to end, easy to submit a change to, and small enough to
 hand to a coding agent with the whole thing in view.
 
+## Make it yours
+
+Most Kubernetes tools give everyone the same screen. Kubi lets you strip it down
+to what you work with and shape the rest around it.
+
+**Keep only the menu items you need.** The sidebar starts with the kinds most
+sessions reach for, and every other kind waits under **More**. Drag a kind to
+reorder it, or drag it onto **More** to remove it. Under **More**, hover a kind
+and click **+** to add it, or drag it up into the list. Right-click any kind to
+move it up or down, add or remove it, or **Reset sidebar** to the defaults. The
+sidebar is one list for every context and every open dashboard, and it
+collapses to icons when you want the room for the table.
+
+**Arrange the columns.** Drag a header to move its column. Drag a header's edge
+to set its width, and double-click the edge to fit it to its content again.
+Right-click a header, or use the **Columns** button in the toolbar, to hide the
+columns you don't need, show them again, or put the table back to its defaults.
+Each table remembers its layout, in every dashboard.
+
+**Add your own columns from labels.** **Add label column…** in the same menu
+shows any label as a column under a name you choose, such as
+`node.kubernetes.io/instance-type` as **SKU** on Nodes. It offers the labels on
+the objects listed, with a few of their values, or takes a key you type. The
+value is read from the list the table already fetches, so it costs no extra
+calls. Right-click the header to rename or remove it, and filter on it like any
+other column: `sku:D2ds`.
+
+**Tune the UI and the behaviour.** Pick compact, default or comfortable rows;
+draw CPU and memory sparklines in the tables; set the refresh interval or turn
+it off; turn drag-to-select on or off; open new dashboards as a tab among your
+editors or in the group beside them; and point each workspace at its own
+kubeconfig, `kubectl` and editor. **Settings** at the bottom of the sidebar
+takes you straight there — see [Settings](#settings) for the full list.
+
 ## Main features
 
 **Dashboard — one editor tab per context.** Inside a dashboard:
@@ -78,12 +120,8 @@ hand to a coding agent with the whole thing in view.
 
   Kinds go by their Kubernetes names. The few too long for the sidebar show
   their short name there instead (HPA, PVC, PDB), with the full name on hover.
-
-  Make the sidebar yours: drag a kind to reorder it, and drag it onto **More**
-  to remove it. Under **More**, hover a kind and click **+** to add it, or drag
-  it up into the list. Right-click any kind to move it up or down, add or remove
-  it, or **Reset sidebar** to the defaults. The sidebar is one list for every
-  context and every open dashboard.
+  Add, remove and reorder them as described under
+  [Make it yours](#make-it-yours).
 
   To skip the sidebar, press `:` (as in k9s) or click **Go to…** and type a
   kind's name, its kubectl short name (`svc`, `cm`, `pvc`) or its initials
@@ -98,17 +136,8 @@ hand to a coding agent with the whole thing in view.
 
   Columns size themselves to their content and to the pane: when a table is
   too wide, the long text columns (node names, messages) give way before
-  anything scrolls sideways. Drag a header's edge to resize it, and double-click
-  the edge to fit it to its content again. Drag a header to move the column.
-  Right-click a header, or use the **Columns** button in the toolbar, to hide or
-  show columns or put a table back to its defaults. Each table remembers its
-  layout, in every dashboard.
-
-  **Add label column…** in the same menu shows a label as a column under a name
-  you choose, such as `node.kubernetes.io/instance-type` as **SKU** on Nodes. It
-  offers the labels on the objects listed, with a few of their values, or takes
-  a key you type. The value is read from the list the table already fetches, so
-  it costs no extra calls. Right-click the header to rename or remove it.
+  anything scrolls sideways. Move, resize and hide them, or add your own from
+  labels, as described under [Make it yours](#make-it-yours).
 
 - **Detail drawer** — select a row for its fields plus actions: Describe, YAML,
   Logs, Shell, Pods, Port forward, Scale, Restart, Delete. Scale is offered on Deployments,
@@ -286,19 +315,31 @@ and `npm run package` then fails.
 ## Settings
 
 **Settings** at the bottom of the dashboard's sidebar opens these in VS Code's
-settings editor.
+settings editor. Like any VS Code setting, each can be set for all your
+windows or just for one workspace.
+
+The sidebar, column layouts and label columns are not settings: you change
+them in the dashboard itself, as described under
+[Make it yours](#make-it-yours).
+
+**Look and feel**
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `kubi.kubectlPath` | `kubectl` | Path to the kubectl binary. |
-| `kubi.kubeconfigPath` | *(empty)* | Kubeconfig to use instead of the default. Empty means `$KUBECONFIG`, or `~/.kube/config` when that is unset. Accepts `~` and a `:`-joined list, like `$KUBECONFIG` itself. |
-| `kubi.editorCommand` | `code --wait` | Editor used as `KUBE_EDITOR` for `kubectl edit`. Must block until the file is closed. |
-| `kubi.autoRefreshSeconds` | `5` | Auto-refresh interval in seconds; `0` disables. Only visible dashboards refresh. |
-| `kubi.preserveCacheAfterUpdates` | `true` | Keep cached dashboard data when the extension updates, so the first dashboard opened after an update paints immediately. Turn it off if you would rather each update start empty: a view cached by an older build can paint blank cells until its first refresh replaces it. Also on the About page. |
-| `kubi.dashboardEditorGroup` | `active` | Which editor group a new dashboard opens in: `active` as a tab next to the editors already in the current group, or `beside` in the group to its side, as Open to the Side does. |
-| `kubi.dragToSelect` | `true` | Select table rows by dragging a selection box across them. |
 | `kubi.rowHeight` | `default` | Height of the table rows: `compact`, close to the editor's line height; `default`, slightly taller; or `comfortable`, the most spacious. |
 | `kubi.tableSparklines` | `false` | Draw a sparkline of the last ten minutes beside the CPU and memory readings in the Nodes and Pods tables. A row's sparkline appears only once a full ten minutes of readings has been recorded, so there are none for the first ten minutes after a dashboard opens. |
+| `kubi.dragToSelect` | `true` | Select table rows by dragging a selection box across them. |
+| `kubi.dashboardEditorGroup` | `active` | Which editor group a new dashboard opens in: `active` as a tab next to the editors already in the current group, or `beside` in the group to its side, as Open to the Side does. |
+| `kubi.autoRefreshSeconds` | `5` | Auto-refresh interval in seconds; `0` disables. Only visible dashboards refresh. |
+| `kubi.preserveCacheAfterUpdates` | `true` | Keep cached dashboard data when the extension updates, so the first dashboard opened after an update paints immediately. Turn it off if you would rather each update start empty: a view cached by an older build can paint blank cells until its first refresh replaces it. Also on the About page. |
+
+**Cluster access and tools**
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `kubi.kubeconfigPath` | *(empty)* | Kubeconfig to use instead of the default. Empty means `$KUBECONFIG`, or `~/.kube/config` when that is unset. Accepts `~` and a `:`-joined list, like `$KUBECONFIG` itself. |
+| `kubi.kubectlPath` | `kubectl` | Path to the kubectl binary. |
+| `kubi.editorCommand` | `code --wait` | Editor used as `KUBE_EDITOR` for `kubectl edit`. Must block until the file is closed. |
 
 ## Roadmap
 
