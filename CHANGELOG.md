@@ -4,6 +4,23 @@ All notable changes to Kubi are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] — 2026-10-08
+
+### Added
+
+- Add kubi.rowHeight to choose compact, default or comfortable table rows, defaulting to slightly taller rows than before.
+
+### Changed
+
+- Cut the frame's corner curves off halfway, so they no longer run alongside VS Code's side line as a doubled strip.
+- Round the dashboard frame's top corners to meet VS Code's rounded webview, so the border no longer breaks off at them.
+- Replace the brand row's « with a sidebar icon closing to the left, drawn like the rail's other icons.
+
+### Removed
+
+- Drop the dashboard frame's bottom border too, which also doubled VS Code's own.
+- Drop the dashboard frame's left and right borders, which doubled VS Code's own.
+
 ## [1.3.0] — 2026-10-08
 
 ### Changed
