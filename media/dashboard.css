@@ -2476,7 +2476,7 @@ body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackg
   color: var(--vscode-badge-foreground, inherit);
 }
 
-/* One row per broken pod, in a single bordered block like the event groups. */
+/* The pod problems line, in a bordered block like the event groups. */
 .ov-pods {
   display: flex;
   flex-direction: column;
@@ -2504,26 +2504,14 @@ body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackg
 .ov-pod:hover { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12)); }
 .ov-pod:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 
-/* The status pill leads and is the widest fixed thing on the row, so the names
-   beside it start on a common left edge instead of stepping in and out. */
-.ov-pod .pill { flex: none; min-width: 132px; }
-
-/* The name is what the row is for: it takes the space and truncates last. The
-   8px gap is what separates the name from the "/" the namespace draws after
-   itself — the same pairing the event rows use. */
-.ov-pod-name { display: flex; min-width: 0; gap: 8px; }
-.ov-pod-name .ov-object { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.ov-ready,
-.ov-restarts {
-  flex: none;
-  font-size: 0.85em;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
-}
-
-/* Restarts are the one number here that is itself a symptom. */
-.ov-restarts { color: var(--warn); }
+/* The pod problems line: the count in its verdict colour, the split beside it
+   for context, and where the click goes at the far end. */
+.ov-pod-count { font-weight: 600; }
+.ov-pod-count.bad { color: var(--bad); }
+.ov-pod-count.warn { color: var(--warn); }
+.ov-pod-detail { font-size: 0.85em; color: var(--muted); }
+.ov-pod-go { flex: none; font-size: 0.85em; color: var(--vscode-textLink-foreground, inherit); }
+.ov-pod-problems:hover .ov-pod-go { text-decoration: underline; }
 
 .ov-groups { display: flex; flex-direction: column; gap: 6px; }
 
@@ -2660,9 +2648,8 @@ body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackg
   .field-label { flex: none; }
   /* Stat boxes across cannot hold a two-digit figure and its label. */
   .ov-summary { flex-direction: column; }
-  /* The pod's namespace and its ready count both lose to its name. */
-  .ov-pod .ov-ns, .ov-ready { display: none; }
-  .ov-pod .pill { min-width: 0; }
+  /* The split loses to the count and the link. */
+  .ov-pod-detail { display: none; }
   /* The newest occurrence is the first thing to go: the reason and count carry
      the row on their own, and it is repeated in full inside the group. */
   .ov-newest .ov-object { display: none; }

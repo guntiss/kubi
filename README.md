@@ -97,7 +97,8 @@ takes you straight there — see [Settings](#settings) for the full list.
 
 **Dashboard — one editor tab per context.** Inside a dashboard:
 
-- **Overview** — unhealthy pods and every Warning event the cluster is holding,
+- **Overview** — how many pods have problems (one click opens Pods filtered to
+  them, in all namespaces) and every Warning event the cluster is holding,
   grouped by reason. A cluster whose events have all expired past their TTL says
   so rather than claiming all is well.
 

@@ -2605,7 +2605,7 @@
     return renderTableSkeleton();
   }
 
-  /** The Overview's summary band, a few pod rows, and collapsed reason rows. */
+  /** The Overview's summary band, the pod problems line, and collapsed reason rows. */
   function renderOverviewSkeleton() {
     return el('div', { class: 'skeleton overview', 'aria-busy': 'true', 'aria-label': 'Loading' },
       el('div', { class: 'ov-summary' },
@@ -2615,11 +2615,9 @@
         el('div', { class: 'ov-stat' }, bar('44%'), el('div', { class: 'sk-bar sk-line', style: 'width: 40%' }))
       ),
       el('div', { class: 'ov-pods' },
-        ...['52%', '68%', '44%'].map((width) =>
-          el('div', { class: 'ov-pod' },
-            el('span', { class: 'sk-bar', style: 'width: 118px' }),
-            el('span', { class: 'sk-bar', style: `width: ${width}` })
-          )
+        el('div', { class: 'ov-pod' },
+          el('span', { class: 'sk-bar', style: 'width: 148px' }),
+          el('span', { class: 'sk-bar', style: 'width: 22%' })
         )
       ),
       ...['88%', '64%', '76%', '58%'].map((width) =>
@@ -2766,7 +2764,7 @@
 
     return el('div', { class: 'overview' },
       renderOverviewSummary(overview, pods),
-      pods.length ? renderUnhealthyPods(pods) : null,
+      pods.length ? renderPodProblems(pods) : null,
       overview.rows.length
         ? el('div', { class: 'ov-section' },
           renderEventsHeading(overview),
@@ -2829,54 +2827,45 @@
   }
 
   /**
-   * The unhealthy pods, one row each — no grouping. There are rarely many (a
-   * cluster with fifty broken pods has one broken thing, and its events say
-   * which), and a pod's name is the whole point: it is what gets typed into the
-   * next command. Clicking one opens the Pods table with that pod selected,
-   * where logs, describe and the container list already live.
+   * The unhealthy pods, as one line rather than a list. The Pods table already
+   * lists them better — sortable, filterable, with logs and describe a click
+   * away — so this says how many there are and takes you there, filtered to
+   * the same Problems bucket across every namespace.
    */
-  function renderUnhealthyPods(pods) {
-    return el('div', { class: 'ov-section' },
-      ovHeading('Unhealthy pods', pods.length),
-      el('div', { class: 'ov-pods' }, ...pods.map(renderUnhealthyPod))
-    );
-  }
-
-  function renderUnhealthyPod(row) {
-    const restarts = Number(row.cells.restarts || 0);
-    return el('button', {
-      class: 'ov-pod',
-      title: 'Open in Pods',
-      onclick: () => openPod(row)
-    },
-      statusPill(row, row.cells.status || row.status),
-      el('span', { class: 'ov-pod-name' },
-        row.namespace ? el('span', { class: 'ov-ns', text: row.namespace }) : null,
-        el('span', { class: 'ov-object', text: row.name })
-      ),
-      el('span', { class: 'spacer' }),
-      el('span', { class: 'ov-ready', title: 'Containers ready', text: row.cells.ready || '' }),
-      // Zero restarts is the normal case and a column of "0" is noise; a
-      // restart count only earns space once there is one to report.
-      restarts ? el('span', { class: 'ov-restarts', title: count(restarts, 'restart'), text: '↻' + restarts }) : null,
-      el('span', {
-        class: 'ov-age',
-        title: formatTimestamp(row.created),
-        'data-age-from': row.created || undefined
-      }, row.created ? formatAge(row.created) : '')
+  function renderPodProblems(pods) {
+    const bad = pods.filter((row) => row.health === 'bad').length;
+    const warn = pods.length - bad;
+    const detail = [
+      bad ? `${bad} failing` : '',
+      warn ? `${warn} warning / pending` : ''
+    ].filter(Boolean).join(' · ');
+    return el('div', { class: 'ov-pods' },
+      el('button', {
+        class: 'ov-pod ov-pod-problems',
+        title: 'Open Pods filtered to Problems, in all namespaces',
+        onclick: openPodProblems
+      },
+        el('span', { class: 'ov-pod-count ' + (bad ? 'bad' : 'warn'),
+          text: `${count(pods.length, 'pod')} ${pods.length === 1 ? 'has' : 'have'} problems` }),
+        el('span', { class: 'ov-pod-detail', text: detail }),
+        el('span', { class: 'spacer' }),
+        el('span', { class: 'ov-pod-go', text: 'Show in Pods →' })
+      )
     );
   }
 
   /**
-   * Jumps to the Pods table with this pod selected. The row travels as-is
-   * rather than being looked up after the switch: `select` clears the rows and
-   * the extension's reply is a round-trip away, so waiting for it would leave
-   * the panel empty for as long as the load takes. The rows that arrive carry
-   * the same key, and the selection survives them.
+   * Jumps to the Pods table with the Problems filter on and the namespace
+   * picker widened, so it lists exactly the pods counted here. `select` resets
+   * the status filter on a kind switch, so it is set after.
    */
-  function openPod(row) {
+  function openPodProblems() {
     select('pods');
-    selectRow(row);
+    state.status = 'health:problem';
+    if (state.namespace !== state.allNamespaces) {
+      state.namespace = state.allNamespaces;
+      post({ type: 'setNamespace', namespace: state.namespace });
+    }
     render();
   }
 
