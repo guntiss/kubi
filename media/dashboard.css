@@ -34,16 +34,15 @@ body {
 /*
  * The outer frame. The border sits on #app rather than body so it hugs the
  * rail and content as one surface; height is 100vh with border-box sizing, so
- * the 1px edges come out of the viewport instead of adding a scrollbar. Top
- * and bottom only: VS Code already draws the editor group's sides, so left and
- * right edges here doubled them.
+ * the 1px edge comes out of the viewport instead of adding a scrollbar. Top
+ * only: VS Code already draws the editor group's sides and bottom, so edges
+ * there doubled them.
  */
 #app {
   display: flex;
   height: 100vh;
   overflow: hidden;
   border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
 }
 
 /*
@@ -1349,7 +1348,7 @@ table.grid tr.selected .pill { background: none; color: inherit; padding: 0; fon
   position: fixed;
   /* Inset by the width of the #app frame so the backdrop stops at the border
      rather than painting over it. */
-  inset: 1px 0;
+  inset: 1px 0 0;
   z-index: 10;
   display: flex;
   /* Flush to the right edge, full height: the panel is part of the window's
