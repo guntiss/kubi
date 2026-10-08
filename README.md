@@ -74,8 +74,8 @@ collapses to icons when you want the room for the table.
 
 **Arrange the columns.** Drag a header to move its column. Drag a header's edge
 to set its width, and double-click the edge to fit it to its content again.
-Right-click a header, or use the **Columns** button in the toolbar, to hide the
-columns you don't need, show them again, or put the table back to its defaults.
+Right-click a header to hide the columns you don't need, show them again, or
+put the table back to its defaults.
 Each table remembers its layout, in every dashboard.
 
 **Add your own columns from labels.** **Add label column…** in the same menu

@@ -491,7 +491,7 @@ body.rail-moving .flyout { display: none !important; }
   /*
    * As tall as a row of filters, so a page without any (Overview, About) gets
    * the same band as a table rather than one shrunk to its title. The 26px is
-   * the Columns button's square, which the filter controls also come to; the
+   * the bell's square, which the filter controls also come to; the
    * padding and the rule sit on top of it under border-box sizing.
    */
   min-height: calc(26px + 2 * 8px + 1px);
@@ -501,10 +501,9 @@ body.rail-moving .flyout { display: none !important; }
  * The refresh control and the spinner that stands in for it while a fetch is in
  * flight occupy one fixed square, so the toolbar doesn't shift as they swap.
  * The icon carries the button on its own: a label would only repeat the tooltip
- * at the cost of the width. The Columns button beside it is the same square.
+ * at the cost of the width. The bell beside it is the same square.
  */
 .toolbar .refresh-slot,
-.toolbar .columns-button,
 .toolbar .bell {
   flex: none;
   display: inline-flex;
@@ -536,9 +535,6 @@ body.rail-moving .flyout { display: none !important; }
   width: 14px;
   height: 14px;
 }
-
-/* Drawn at the size the refresh arrow is, so the pair carry the same weight. */
-.columns-mark { width: 15px; height: 15px; flex: none; }
 
 /*
  * A table's filters, in the toolbar between the title and the controls on the
@@ -2874,7 +2870,7 @@ button.icon-button:hover {
   background: var(--vscode-focusBorder, var(--vscode-charts-blue, #4a9eff));
 }
 
-/* The toolbar's bell: the Columns button's square, with the count on its corner. */
+/* The toolbar's bell: the refresh button's square, with the count on its corner. */
 .toolbar .bell { position: relative; color: var(--muted); }
 .toolbar .bell:hover,
 .toolbar .bell.open { color: var(--vscode-foreground); }

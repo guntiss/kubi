@@ -2292,7 +2292,6 @@
     if (refreshError) children.push(refreshError);
 
     children.push(renderFreshness());
-    if (filters) children.push(renderColumnsButton());
     if (SHOW_REFRESH_BUTTON) children.push(renderRefresh());
     const bell = renderBell();
     if (bell) children.push(bell);
@@ -3969,11 +3968,11 @@
   }
 
   /**
-   * The header's context menu, and the toolbar's Columns button: every column
-   * the table can show, ticked if it is, plus a way back to the defaults. On a
-   * header it leads with what can be done to that column alone.
+   * The header's context menu: every column the table can show, ticked if it
+   * is, plus a way back to the defaults. On a header it leads with what can be
+   * done to that column alone.
    */
-  function openColumnMenu(point, key, anchor) {
+  function openColumnMenu(point, key) {
     closeRowMenu();
     const kind = kindOf(state.active);
     if (!kind) return;
@@ -4033,39 +4032,7 @@
         fitTable();
       }
     });
-    showMenu(items, point, { anchor, alignRight: Boolean(anchor) });
-  }
-
-  /**
-   * The toolbar's way into the column menu, for anyone who doesn't think to
-   * right-click a header — and for the keyboard, which can't.
-   */
-  function renderColumnsButton() {
-    const button = el('button', {
-      class: 'columns-button',
-      title: 'Columns',
-      'aria-label': 'Columns',
-      'aria-haspopup': 'menu',
-      onclick: () => {
-        // A second click on the button closes the menu it opened.
-        if (rowMenu && rowMenu.anchor === button) {
-          closeRowMenu();
-          return;
-        }
-        const box = button.getBoundingClientRect();
-        openColumnMenu({ x: box.right, y: box.bottom + 4 }, null, button);
-      }
-    }, columnsMark());
-    return button;
-  }
-
-  /** A frame split into three: the usual glyph for choosing columns. */
-  function columnsMark() {
-    const mark = svg('svg', { class: 'columns-mark', viewBox: '0 0 16 16', 'aria-hidden': 'true' });
-    const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.4' };
-    mark.appendChild(svg('rect', { x: '1.7', y: '2.7', width: '12.6', height: '10.6', rx: '1.5', ...stroke }));
-    mark.appendChild(svg('path', { d: 'M6 2.7v10.6M10 2.7v10.6', ...stroke }));
-    return mark;
+    showMenu(items, point);
   }
 
   /** The kind's column for a key, when it is one of the usage columns. */
@@ -5962,24 +5929,20 @@
   /**
    * Opens a menu of `items` at `point`, flipped back inside the viewport when
    * it would run off the right or bottom edge. A null item is a separator, and
-   * an item with `checked` is a toggle drawn with a tick. `anchor` is the
-   * button that opened it, if one did, which a press on does not count as a
-   * press outside; `alignRight` hangs the menu left of the point, under the
-   * right edge of that button.
+   * an item with `checked` is a toggle drawn with a tick.
    */
-  function showMenu(items, point, { key = null, anchor = null, alignRight = false } = {}) {
+  function showMenu(items, point, { key = null } = {}) {
     const { menu, buttons } = buildMenu(items);
     document.body.appendChild(menu);
 
     const box = menu.getBoundingClientRect();
-    const left = alignRight ? point.x - box.width : point.x;
-    const x = Math.min(left, window.innerWidth - box.width - 4);
+    const x = Math.min(point.x, window.innerWidth - box.width - 4);
     const y = point.y + box.height > window.innerHeight
       ? Math.max(4, point.y - box.height)
       : point.y;
     menu.style.left = `${Math.max(4, x)}px`;
     menu.style.top = `${y}px`;
-    rowMenu = { menu, key, buttons, anchor, sub: null };
+    rowMenu = { menu, key, buttons, sub: null };
   }
 
   /**
@@ -6240,9 +6203,6 @@
   // anywhere else, a scroll, or the panel losing focus or size.
   document.addEventListener('mousedown', (e) => {
     if (!rowMenu || inRowMenu(e.target)) return;
-    // The button that opened it closes it again on its own click, which this
-    // would otherwise beat to it — and the click would then reopen it.
-    if (rowMenu.anchor && rowMenu.anchor.contains(e.target)) return;
     closeRowMenu();
   }, true);
   document.addEventListener('scroll', () => closeRowMenu(), true);
