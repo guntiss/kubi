@@ -835,7 +835,7 @@
           },
             brandMark(),
             el('span', { class: 'name', text: 'Kubi' }),
-            el('span', { class: 'chevron', text: '«' })
+            icon('collapse', 'chevron')
           ),
       renderKindJump(),
       // Everything above stays put; only the kinds scroll, so the brand row
@@ -1370,6 +1370,8 @@
    */
   const ICONS = {
     fallback: '<circle cx="12" cy="12" r="3"/>',
+    // The brand row's collapse hint: a sidebar panel, closing to the left.
+    collapse: '<rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/>',
     overview: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/>'
       + '<rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
     about: '<circle cx="12" cy="12" r="9.5"/><path d="M12 16.5v-5"/><path d="M12 7.5h.01"/>',
