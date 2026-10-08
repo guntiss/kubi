@@ -7602,6 +7602,7 @@
         state.columnLayouts = message.columnLayouts || {};
         state.dragToSelect = Boolean(message.dragToSelect);
         state.tableSparklines = Boolean(message.tableSparklines);
+        document.body.dataset.rowHeight = message.rowHeight || 'default';
         state.extension = message.extension || null;
         render();
         break;
@@ -7663,6 +7664,11 @@
         // the sparklines in them.
         state.tableSparklines = Boolean(message.enabled);
         render();
+        break;
+      case 'rowHeight':
+        // Only the cells' padding changes, which the stylesheet picks up from
+        // the attribute; the columns keep their widths, so nothing is rebuilt.
+        document.body.dataset.rowHeight = message.rowHeight || 'default';
         break;
       case 'namespace':
         // Restores the saved preference at startup. Rows span all namespaces

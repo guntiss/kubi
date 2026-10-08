@@ -150,6 +150,21 @@
           "default": true,
           "description": "Enable row selection by dragging."
         },
+        "kubi.rowHeight": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "default",
+            "comfortable"
+          ],
+          "enumDescriptions": [
+            "Rows close to the editor's 22px line, fitting the most on screen.",
+            "Slightly taller rows, with a little more room between them.",
+            "The tallest rows, the most space between them."
+          ],
+          "default": "default",
+          "description": "Height of the rows in the resource tables."
+        },
         "kubi.tableSparklines": {
           "type": "boolean",
           "default": false,

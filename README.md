@@ -290,6 +290,7 @@ settings editor.
 | `kubi.preserveCacheAfterUpdates` | `true` | Keep cached dashboard data when the extension updates, so the first dashboard opened after an update paints immediately. Turn it off if you would rather each update start empty: a view cached by an older build can paint blank cells until its first refresh replaces it. Also on the About page. |
 | `kubi.dashboardEditorGroup` | `active` | Which editor group a new dashboard opens in: `active` as a tab next to the editors already in the current group, or `beside` in the group to its side, as Open to the Side does. |
 | `kubi.dragToSelect` | `true` | Select table rows by dragging a selection box across them. |
+| `kubi.rowHeight` | `default` | Height of the table rows: `compact`, close to the editor's line height; `default`, slightly taller; or `comfortable`, the most spacious. |
 | `kubi.tableSparklines` | `false` | Draw a sparkline of the last ten minutes beside the CPU and memory readings in the Nodes and Pods tables. A row's sparkline appears only once a full ten minutes of readings has been recorded, so there are none for the first ten minutes after a dashboard opens. |
 
 ## Roadmap

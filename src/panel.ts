@@ -453,6 +453,9 @@ export class DashboardPanel {
         if (e.affectsConfiguration('kubi.tableSparklines')) {
           this.post({ type: 'tableSparklines', enabled: tableSparklines() });
         }
+        if (e.affectsConfiguration('kubi.rowHeight')) {
+          this.post({ type: 'rowHeight', rowHeight: rowHeight() });
+        }
       })
     );
   }
@@ -810,6 +813,7 @@ export class DashboardPanel {
       columnLayouts: this.extension.globalState.get<Record<string, ColumnLayout>>(COLUMN_LAYOUTS_KEY, {}),
       dragToSelect: dragToSelect(),
       tableSparklines: tableSparklines(),
+      rowHeight: rowHeight(),
       extension: extensionInfo(this.extension.extension)
     });
     // A webview reload loses its state but not the kubectl processes behind it,
@@ -2736,6 +2740,11 @@ function dragToSelect(): boolean {
 /** Whether the Nodes and Pods tables draw usage sparklines. Off unless turned on. */
 function tableSparklines(): boolean {
   return vscode.workspace.getConfiguration('kubi').get<boolean>('tableSparklines') ?? false;
+}
+
+/** How tall the table rows are: `compact`, `default` or `comfortable`. */
+function rowHeight(): string {
+  return vscode.workspace.getConfiguration('kubi').get<string>('rowHeight') || 'default';
 }
 
 /**

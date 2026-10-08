@@ -14,7 +14,11 @@
    */
   --header-bg: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.14));
   --action-bar-height: 38px;
+  /* Vertical padding of a table cell, set by `kubi.rowHeight`. */
+  --row-pad: 5px;
 }
+body[data-row-height="compact"] { --row-pad: 3px; }
+body[data-row-height="comfortable"] { --row-pad: 8px; }
 
 * { box-sizing: border-box; }
 
@@ -902,8 +906,8 @@ table.grid.measuring {
 
 /*
  * Sized like VS Code's own lists rather than like a document table: a header
- * and rows close to the editor's 22px line, in the sentence-case labels the
- * workbench uses. Uppercase, letter-spaced labels read as a heading over every
+ * close to the editor's 22px line, rows that height or a little taller as
+ * `kubi.rowHeight` asks, in the sentence-case labels the workbench uses. Uppercase, letter-spaced labels read as a heading over every
  * column, and cost a column's worth of width across a wide table.
  */
 thead th {
@@ -926,7 +930,7 @@ thead th:hover { color: var(--vscode-foreground); }
 thead th .arrow { opacity: 0.55; font-size: 0.85em; }
 
 tbody td {
-  padding: 3px 10px;
+  padding: var(--row-pad) 10px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
   overflow: hidden;
@@ -2051,7 +2055,7 @@ tbody td.empty-cell .state { padding: 40px 20px; }
 
 /* Table skeleton: matches thead/tbody metrics so nothing shifts on arrival. */
 .skeleton thead th { color: var(--muted); }
-.skeleton tbody td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.skeleton tbody td { padding: calc(var(--row-pad) + 4px) 10px; border-bottom: 1px solid var(--border); }
 .sk-check { width: 13px; height: 13px; border-radius: 3px; }
 .sk-button { width: 54px; height: 20px; border-radius: 4px; }
 
