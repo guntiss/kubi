@@ -4,6 +4,13 @@ All notable changes to Kubi are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-10-08
+
+### Changed
+
+- Narrow the collapsed rail back to 48px, insetting its pills by 6px to fit.
+- Give the rail room to breathe and draw its kinds as SVG icons: rows are taller rounded pills with an edge bar on the open page, headings and Go to get more space, and each kind, Overview, About and Settings get a stroked icon in place of the Unicode characters.
+
 ## [1.2.0] — 2026-10-06
 
 ### Added
