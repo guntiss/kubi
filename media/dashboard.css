@@ -53,6 +53,11 @@ body {
  * straight top border short of each corner and leaves a gap where its own
  * side border should meet it. This draws the curve the top edge turns
  * through, over everything else in the window, so the two join up.
+ *
+ * VS Code's side line runs straight up outside the rounded clip, so the
+ * curve's lower half would run alongside it and read as one doubled line.
+ * The clip-path cuts that half off; shortening the box instead would make the
+ * browser scale the radius down to fit.
  */
 #app::before {
   content: "";
@@ -64,6 +69,7 @@ body {
   border: 1px solid var(--border);
   border-bottom: none;
   border-radius: var(--frame-radius) var(--frame-radius) 0 0;
+  clip-path: inset(0 0 calc(var(--frame-radius) / 2) 0);
   pointer-events: none;
   z-index: 50;
 }
