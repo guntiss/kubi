@@ -178,47 +178,28 @@ button.brand:hover .chevron { color: var(--vscode-foreground); }
 }
 
 /*
- * Hovering charges the mark. The hexagon turns a third of the way round,
- * overshooting and settling back, while the bolt flickers like a strike and
- * the mark lights up, keeping a soft glow for as long as the pointer stays.
- * `charged` is set by the script rather than this being `:hover`, so that it
- * plays once per visit however often a refresh rebuilds the rail; see
- * `brandVisit` in dashboard.js.
- *
- * A third of a turn is a multiple of the hexagon's own symmetry, so it ends
- * looking exactly as it started: leaving drops the animation outright, with
- * no turn back to watch and no jump, and the next visit plays it afresh.
- * Each part turns and scales about its own centre, not the SVG's corner.
+ * The mark doubles as the page's status light. Red when the last refresh
+ * failed, grey while the content on screen is stale — cached, or left behind
+ * by a cancelled fetch — and in its own blue otherwise. A failure outranks
+ * staleness, since failed content is stale too. Set by `syncBrand` in
+ * dashboard.js, which keeps both across the rail's rebuilds.
  */
-.brand .mark-hex,
-.brand .mark-bolt {
+.brand.failed .mark { color: var(--vscode-errorForeground, var(--bad)); }
+.brand.stale .mark { color: var(--muted); }
+
+/*
+ * While a fetch is in flight, background polls included, the hexagon turns
+ * slowly about its own centre with the bolt held still inside it. The turn is
+ * driven from the script rather than a CSS animation so it carries on through
+ * the rail's rebuilds instead of starting over; see `syncBrand`.
+ */
+.brand .mark-hex {
   transform-box: fill-box;
   transform-origin: center;
 }
-.brand.charged .mark { animation: mark-glow 0.9s ease-out forwards; }
-.brand.charged .mark-hex { animation: mark-turn 0.75s cubic-bezier(0.3, 1.6, 0.5, 1); }
-.brand.charged .mark-bolt { animation: mark-strike 0.6s linear; }
-@keyframes mark-turn {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(120deg); }
-}
-@keyframes mark-strike {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  8% { opacity: 0.15; transform: scale(0.9); }
-  16% { opacity: 1; transform: scale(1.2); }
-  26% { opacity: 0.35; }
-  36% { opacity: 1; transform: scale(1.1); }
-  60% { transform: scale(1); }
-}
-@keyframes mark-glow {
-  0% { filter: none; }
-  20%, 40% { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 6px currentColor); }
-  100% { filter: drop-shadow(0 0 2px currentColor); }
-}
-/* Still lit, without the motion. */
+/* No turning; a dimmed mark says a fetch is running instead. */
 @media (prefers-reduced-motion: reduce) {
-  .brand.charged .mark-hex,
-  .brand.charged .mark-bolt { animation: none; }
+  .brand.busy .mark { opacity: 0.6; }
 }
 
 /*

@@ -270,8 +270,8 @@
       for (const [key, value] of Object.entries(extra || {})) node.setAttribute(key, value);
       return node;
     };
-    // Classed so the hover animation can turn the hexagon and strike the bolt
-    // apart; see `.mark-hex` in the CSS.
+    // Classed so the hexagon can turn on its own while a fetch runs; see
+    // `syncBrand`.
     svg.appendChild(path(BRAND_HEX, { 'stroke-linejoin': 'round', class: 'mark-hex' }));
     svg.appendChild(path(BRAND_BOLT, { fill: 'currentColor', stroke: 'none', class: 'mark-bolt' }));
     return svg;
@@ -698,7 +698,7 @@
     }
     const rail = app.querySelector('.rail-scroll');
     if (rail) rail.scrollTop = railScroll;
-    chargeBrand();
+    syncBrand();
     restoreDetailScroll(detail);
     settleLogScroll();
     restoreSearchFocus(caret);
@@ -1302,53 +1302,61 @@
       const scroller = next.querySelector('.rail-scroll');
       if (scroller) scroller.scrollTop = scroll;
       syncKindMenu();
-      chargeBrand();
+      syncBrand();
     } else {
       render();
     }
   }
 
   /**
-   * The pointer's visit to the brand row, which plays the mark's animation
-   * once (see `.brand.charged` in the CSS). Left to `:hover`, it replayed
-   * every few seconds while the pointer sat still: a refresh rebuilds the
-   * rail, and each rebuild is a fresh element under the pointer, starting the
-   * animation over. So the visit is kept here instead, where rebuilds cannot
-   * reach it, and a rebuilt row picks the animation up where the visit has
-   * got to — mid-turn, or settled.
+   * The brand mark as the page's status light: red after a failed refresh,
+   * grey over stale content, and turning slowly while a fetch is in flight.
+   * See `.brand.failed` in the CSS.
+   *
+   * The turn is a Web Animation started from here rather than a CSS one: every
+   * render rebuilds the rail, and a CSS animation on the new mark would start
+   * over from nothing. Keeping when the turn began lets each rebuilt mark pick
+   * it up at the same angle. A step is a sixth of a turn, which the hexagon
+   * looks the same after, so a fetch that ends mid-step lets the step finish
+   * and the mark comes to rest without a jump back.
    */
-  const brandVisit = { on: false, since: 0 };
+  const SPIN_STEP_MS = 1200;
+  const brandSpin = { since: 0, timer: 0 };
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-  /** Puts the brand row on screen in step with the visit, if there is one. */
-  function chargeBrand() {
+  function syncBrand() {
+    if (state.busy) {
+      clearTimeout(brandSpin.timer);
+      brandSpin.timer = 0;
+      if (!brandSpin.since) brandSpin.since = performance.now();
+    } else if (brandSpin.since && !brandSpin.timer) {
+      const left = SPIN_STEP_MS - (performance.now() - brandSpin.since) % SPIN_STEP_MS;
+      brandSpin.timer = setTimeout(() => {
+        brandSpin.timer = 0;
+        brandSpin.since = 0;
+        syncBrand();
+      }, left);
+    }
     const brand = app.querySelector('.rail .brand');
     if (!brand) return;
-    brand.classList.toggle('charged', brandVisit.on);
-    if (!brandVisit.on) return;
-    const elapsed = performance.now() - brandVisit.since;
-    for (const animation of brand.getAnimations({ subtree: true })) animation.currentTime = elapsed;
+    const failed = Boolean(state.error || state.refreshError);
+    brand.classList.toggle('failed', failed);
+    brand.classList.toggle('stale', !failed && state.stale);
+    brand.classList.toggle('busy', state.busy);
+    const hex = brand.querySelector('.mark-hex');
+    if (!hex) return;
+    const spinning = brandSpin.since > 0 && !reducedMotion.matches;
+    const running = hex.getAnimations();
+    if (!spinning) {
+      for (const animation of running) animation.cancel();
+    } else if (!running.length) {
+      const animation = hex.animate(
+        [{ transform: 'rotate(0deg)' }, { transform: 'rotate(60deg)' }],
+        { duration: SPIN_STEP_MS, iterations: Infinity }
+      );
+      animation.currentTime = performance.now() - brandSpin.since;
+    }
   }
-
-  function setBrandVisit(on) {
-    if (on === brandVisit.on) return;
-    brandVisit.on = on;
-    brandVisit.since = performance.now();
-    chargeBrand();
-  }
-
-  // On the document, so they outlive the rail. Each time the pointer crosses
-  // into something, what lies under it says whether it is on the brand. Under
-  // it, not the event's target: when a rebuild takes the row away, the browser
-  // first reports the pointer over what held it — #app — and only then over
-  // the new row, and trusting that would end the visit and replay it.
-  // Leaving the panel crosses into nothing.
-  document.addEventListener('pointerover', (e) => {
-    const under = document.elementFromPoint(e.clientX, e.clientY);
-    setBrandVisit(Boolean(under && under.closest('.brand')));
-  });
-  document.addEventListener('pointerout', (e) => {
-    if (!e.relatedTarget) setBrandVisit(false);
-  });
 
   /**
    * A page's icon, drawn as a stroked SVG in `currentColor` so it takes the
@@ -2420,10 +2428,12 @@
   /**
    * Swaps the freshness label in place, so a refresh doesn't rebuild the view.
    * The refresh control tracks the same busy flag, so it is swapped in step
-   * rather than waiting for the next full render, and so does the load bar.
+   * rather than waiting for the next full render, and so do the load bar and
+   * the brand mark.
    */
   function renderFreshnessOnly() {
     syncLoadBar();
+    syncBrand();
     const node = app.querySelector('.toolbar .freshness');
     if (node) {
       node.replaceWith(renderFreshness());
