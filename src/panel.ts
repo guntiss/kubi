@@ -3,6 +3,7 @@ import * as net from 'net';
 import * as vscode from 'vscode';
 import * as k from './kubectl';
 import { DashboardCache } from './cache';
+import { eventsFor, notificationMode } from './events';
 import { metricsFor } from './metrics';
 import { Column, GROUPS, KINDS, RAIL_DEFAULT, REFERENCES, Refs, ResourceKind, Row, kindById, labelCellKey, skew, toRow } from './model';
 
@@ -182,6 +183,11 @@ type Inbound =
     }
   /** One Secret key, decoded on demand: shown in the drawer, or copied unseen. */
   | { type: 'secretValue'; mode: 'reveal' | 'copy'; name: string; namespace: string; key: string }
+  /** The bell, a toast or the Overview marked these issues read. */
+  | { type: 'markEventsRead'; keys: string[] }
+  | { type: 'markAllEventsRead' }
+  /** Stop, or resume, notifying about one event reason on this context. */
+  | { type: 'muteEventReason'; reason: string; muted: boolean }
   | { type: 'clearCache' }
   /** The "Preserve cache after updates" tick on the About page. */
   | { type: 'setPreserveCache'; preserve: boolean }
@@ -306,6 +312,8 @@ export class DashboardPanel {
    * stream stops the one before it.
    */
   private logStream: k.LogStream | undefined;
+  /** The context's events, polled in the background and shared by its dashboards; see events.ts. */
+  private readonly events: ReturnType<typeof eventsFor>;
 
   /**
    * Reveals the context's most recently focused dashboard, or opens one if
@@ -439,6 +447,13 @@ export class DashboardPanel {
     metrics.seed('nodes', this.cache.get(this.cacheKey('nodes'))?.payload);
     metrics.seed('pods', this.cache.get(this.cacheKey('pods'))?.payload);
     this.disposables.push(metrics.retain());
+    // Events are polled the same way, so the bell can say something went
+    // wrong whichever page is open — the point of it is the pages that are
+    // not the Overview.
+    this.events = eventsFor(contextName, extension.globalState);
+    this.events.seed(this.cache.get(this.cacheKey('notifications'))?.payload);
+    this.disposables.push(this.events.retain());
+    this.disposables.push(this.events.onDidChange(() => this.postNotifications()));
     this.panel.webview.onDidReceiveMessage((m: Inbound) => this.onMessage(m), null, this.disposables);
     // Polling pauses while the panel is out of sight, so coming back to it would
     // otherwise show rows as old as the time spent away until the next tick.
@@ -481,6 +496,9 @@ export class DashboardPanel {
         }
         if (e.affectsConfiguration('kubi.rowHeight')) {
           this.post({ type: 'rowHeight', rowHeight: rowHeight() });
+        }
+        if (e.affectsConfiguration('kubi.eventNotifications')) {
+          this.postNotifications();
         }
       })
     );
@@ -794,6 +812,15 @@ export class DashboardPanel {
       case 'secretValue':
         await this.secretValue(message);
         break;
+      case 'markEventsRead':
+        this.events.markRead(message.keys);
+        break;
+      case 'markAllEventsRead':
+        this.events.markAllRead();
+        break;
+      case 'muteEventReason':
+        this.events.setMuted(message.reason, message.muted);
+        break;
       case 'clearCache':
         await this.clearCache();
         break;
@@ -851,6 +878,9 @@ export class DashboardPanel {
       rowHeight: rowHeight(),
       extension: extensionInfo(this.extension.extension)
     });
+    // The bell paints with the first frame, from whatever the store holds —
+    // the last session's issues until the first poll lands.
+    this.postNotifications();
     // A webview reload loses its state but not the kubectl processes behind it,
     // so edits in flight have to be replayed or their buttons come back enabled.
     if (this.editing.size) {
@@ -915,6 +945,23 @@ export class DashboardPanel {
           : { type: 'rows', rows: entry.payload };
     this.post({ ...body, kind: kindId, generated: entry.generated, stale: true });
     return true;
+  }
+
+  /**
+   * The issues for the bell, the toasts and the Overview's read marks. Sent
+   * to this panel only: every dashboard on the context subscribes to the same
+   * store, so each one posts its own.
+   *
+   * `fresh` says the issues came from a fetch this session rather than the
+   * cache. The webview takes the first fresh set as what was already there
+   * when it opened, and toasts only what turns up after it.
+   */
+  private postNotifications(): void {
+    const snapshot = this.events.snapshot();
+    if (snapshot.generated) {
+      this.cache.set(this.cacheKey('notifications'), snapshot, snapshot.generated);
+    }
+    this.post({ type: 'notifications', mode: notificationMode(), ...snapshot, fresh: snapshot.generated > 0 });
   }
 
   /**
@@ -1369,6 +1416,11 @@ export class DashboardPanel {
       if (token !== this.loadToken) {
         return;
       }
+      // A full list of events is what the background poll fetches too, so the
+      // Events table keeps the bell current while it is open.
+      if (kindId === 'events') {
+        this.events.ingest(items);
+      }
       // A log is ordered by time; everything else reads as an inventory.
       this.seenLabels.set(kind.id, labelsOf(items));
       // Read now rather than when the load started, so a column added while
@@ -1405,6 +1457,11 @@ export class DashboardPanel {
    * Builds the Overview: the pods that are not healthy right now, and every
    * Warning event the cluster is currently holding, across all namespaces.
    *
+   * The events come from the context's event store rather than a fetch of
+   * the page's own, so the Overview, the bell and the toasts are one list and
+   * one request: an issue marked read in the bell is read here too. The store
+   * applies the filter below; see `notifiable` in model.ts.
+   *
    * Kubernetes has no severity beyond `type`, which is only ever `Normal` or
    * `Warning` — there is no "Error" tier to ask for — so a Warning is the whole
    * of what the API server will tell you went wrong, and the filter is applied
@@ -1436,23 +1493,26 @@ export class DashboardPanel {
       // would open that page with its CPU and memory columns missing until
       // its own fetch put them back.
       const metrics = metricsFor(this.contextName);
-      const [items, podItems] = await Promise.all([
-        k.list('events', this.contextName, k.ALL_NAMESPACES, signal),
+      const [podItems] = await Promise.all([
         k.list('pods', this.contextName, k.ALL_NAMESPACES, signal),
+        this.events.refresh(),
         metrics.refresh('pods')
       ]);
       if (token !== this.loadToken) {
         return;
       }
-      const rows = items
-        .map((item) => toRow('events', item))
-        .filter((row) => row.status === 'Warning')
+      const { issues, total } = this.events.detail();
+      // Each row carries the issue it belongs to, which is what the page marks
+      // read; whether it is read is looked up live in the webview, so marking
+      // one changes the page without waiting for its next load.
+      const rows = issues
+        .flatMap((issue) => issue.rows.map((row) => ({ ...row, issue: issue.key })))
         .sort(byNewest);
 
       // What the events are *about*, counted by reason, so a hundred rows of
       // the same BackOff read as one problem rather than a hundred. The newest
       // occurrence leads each group, which is what `rows` is already ordered by.
-      const groups = new Map<string, { reason: string; count: number; rows: Row[] }>();
+      const groups = new Map<string, { reason: string; count: number; rows: (Row & { issue: string })[] }>();
       for (const row of rows) {
         const reason = row.cells.reason || 'Unknown';
         const group = groups.get(reason) ?? { reason, count: 0, rows: [] };
@@ -1498,7 +1558,7 @@ export class DashboardPanel {
         // Distinguishes "the cluster is quiet" from "the cluster keeps no
         // events": a cluster whose event TTL has expired everything reports
         // zero of both, and the page says so rather than claiming all is well.
-        total: items.length
+        total
       };
       const generated = Date.now();
       this.cache.set(this.cacheKey('overview'), overview, generated);

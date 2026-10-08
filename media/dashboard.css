@@ -504,7 +504,8 @@ body.rail-moving .flyout { display: none !important; }
  * at the cost of the width. The Columns button beside it is the same square.
  */
 .toolbar .refresh-slot,
-.toolbar .columns-button {
+.toolbar .columns-button,
+.toolbar .bell {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -2645,6 +2646,19 @@ body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackg
   overflow-wrap: anywhere;
 }
 
+/* Read marks. Unread is a dot in the accent colour, as in a mail client. */
+.ov-event.unread { background: color-mix(in srgb, var(--vscode-focusBorder) 5%, transparent); }
+.ov-event-head .mark-read { width: 18px; height: 18px; margin-left: 2px; align-self: center; }
+.ov-group.muted .ov-group-head { opacity: 0.6; }
+.ov-muted {
+  font-size: 0.8em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.ov-heading .link-button { text-transform: none; letter-spacing: 0; font-weight: 400; }
+
 /* The all-clear, in the healthy colour — the one place this page is green. */
 .ov-clear { color: var(--ok); font-size: 1.1em; }
 
@@ -2806,3 +2820,244 @@ body.rail-collapsed .rail-group:hover { background: var(--vscode-list-hoverBackg
 }
 .secret-value.masked { color: var(--muted); user-select: none; }
 .secret-value.error { color: var(--vscode-errorForeground, var(--bad)); }
+
+
+/* ---------- event notifications ---------- */
+
+/* Text-weight buttons for secondary actions: Mark all read, View, Overview. */
+button.link-button {
+  background: transparent;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+  font-size: 0.9em;
+}
+button.link-button:hover {
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+  color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+}
+
+/* A bare glyph button: ✓, ✕, the mute bell. */
+button.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9em;
+  line-height: 1;
+  flex: none;
+}
+button.icon-button:hover {
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+  color: var(--vscode-foreground);
+}
+
+.unread-dot {
+  flex: none;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--vscode-focusBorder, var(--vscode-charts-blue, #4a9eff));
+}
+
+/* The toolbar's bell: the Columns button's square, with the count on its corner. */
+.toolbar .bell { position: relative; color: var(--muted); }
+.toolbar .bell:hover,
+.toolbar .bell.open { color: var(--vscode-foreground); }
+.toolbar .bell.open { border-color: var(--vscode-focusBorder); }
+.bell-mark { width: 15px; height: 15px; flex: none; }
+.bell-badge {
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  pointer-events: none;
+}
+.bell-badge.bad { background: var(--bad); }
+.bell-badge.warn { background: var(--warn); color: #000; }
+
+/* The bell's panel, styled as the row menu is: fixed on the body, under the bell. */
+.notif-panel {
+  position: fixed;
+  z-index: 45;
+  width: min(400px, calc(100vw - 16px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--vscode-menu-border, var(--border));
+  border-radius: 8px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+
+.notif-head,
+.notif-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 8px 14px;
+  flex: none;
+}
+.notif-head { border-bottom: 1px solid var(--border); }
+.notif-foot { border-top: 1px solid var(--border); justify-content: flex-end; padding: 4px 8px; }
+.notif-title { font-weight: 600; }
+
+.notif-list { overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+
+.notif-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 8px 9px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.notif-row:last-child { border-bottom: 0; }
+.notif-row:hover { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12)); }
+.notif-row:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.notif-row:not(.unread) { opacity: 0.72; }
+.notif-row.unread .notif-reason { font-weight: 600; }
+.notif-row.muted { opacity: 0.5; }
+
+/* The health dot: red for what takes a workload away, amber for the rest. */
+.notif-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+.notif-dot.bad { background: var(--bad); }
+.notif-row:not(.unread) .notif-dot { background: var(--muted); }
+
+.notif-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.notif-line { display: flex; align-items: baseline; gap: 8px; font-size: 0.95em; }
+.notif-line .ov-age { color: var(--muted); font-size: 0.85em; }
+.notif-object {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  font-size: 0.88em;
+}
+.notif-object .ov-object { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Two lines of the message; the Overview and the Events table have the rest. */
+.notif-message {
+  color: var(--muted);
+  font-size: 0.86em;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Read and mute stay out of the way until the row is pointed at or focused. */
+.notif-actions { display: flex; gap: 2px; flex: none; opacity: 0; }
+.notif-row:hover .notif-actions,
+.notif-row:focus-within .notif-actions { opacity: 1; }
+.notif-icon { width: 14px; height: 14px; }
+
+.notif-empty { padding: 22px 16px; text-align: center; color: var(--ok); }
+.notif-empty-detail { margin-top: 6px; color: var(--muted); font-size: 0.86em; }
+
+.notif-fold {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85em;
+  text-align: left;
+}
+
+.notif-muted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.85em;
+}
+.notif-muted-label { color: var(--muted); }
+.notif-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.notif-chip .icon-button { width: 18px; height: 18px; font-size: 0.8em; }
+
+/*
+ * Toasts: one at a time, bottom right, over everything. Outside #app, so the
+ * renders that rebuild the page leave it standing.
+ */
+.toast-host {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  position: relative;
+  width: min(360px, calc(100vw - 32px));
+  padding: 10px 30px 6px 12px;
+  border: 1px solid var(--vscode-notifications-border, var(--border));
+  border-left: 3px solid var(--warn);
+  border-radius: 6px;
+  background: var(--vscode-notifications-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+  color: var(--vscode-notifications-foreground, var(--vscode-foreground));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
+  animation: toast-in 160ms ease-out;
+}
+.toast.bad { border-left-color: var(--bad); }
+.toast-body { display: flex; flex-direction: column; gap: 4px; }
+.toast-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.toast-title .notif-dot { align-self: center; margin-top: 0; }
+.toast-title .notif-reason { font-weight: 600; flex: none; }
+.toast-object { display: flex; gap: 8px; min-width: 0; font-size: 0.88em; overflow: hidden; }
+.toast-object .ov-object { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toast-actions { display: flex; justify-content: flex-end; gap: 2px; margin-top: 4px; }
+.toast-close { position: absolute; top: 6px; right: 6px; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}

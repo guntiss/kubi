@@ -101,6 +101,13 @@ takes you straight there — see [Settings](#settings) for the full list.
   grouped by reason. A cluster whose events have all expired past their TTL says
   so rather than claiming all is well.
 
+- **Event notifications** — warning events are checked in the background while
+  a dashboard is open, so you hear about them on any page. A bell in the
+  toolbar counts the unread ones and lists them; a brief toast announces a new
+  one, at most once a minute, and never on the Overview or Events pages. Mark
+  an issue read and its repeats stay quiet; it comes back only if it recurs
+  after an hour of silence. Chronic noise can be muted by reason, per cluster.
+
 - **Resource tables** — compact, sortable, filterable tables with columns
   matched to each kind, and statuses colored by health. The sidebar starts with
   the kinds most sessions reach for: Pods, Deployments, StatefulSets,
@@ -330,6 +337,7 @@ them in the dashboard itself, as described under
 | `kubi.tableSparklines` | `false` | Draw a sparkline of the last ten minutes beside the CPU and memory readings in the Nodes and Pods tables. A row's sparkline appears only once a full ten minutes of readings has been recorded, so there are none for the first ten minutes after a dashboard opens. |
 | `kubi.dragToSelect` | `true` | Select table rows by dragging a selection box across them. |
 | `kubi.dashboardEditorGroup` | `active` | Which editor group a new dashboard opens in: `active` as a tab next to the editors already in the current group, or `beside` in the group to its side, as Open to the Side does. |
+| `kubi.eventNotifications` | `toasts` | How warning events reach you outside the Overview: `toasts`, the bell plus a brief toast for each new one; `badge`, the bell only; or `off`, neither, and no background polling for events. |
 | `kubi.autoRefreshSeconds` | `5` | Auto-refresh interval in seconds; `0` disables. Only visible dashboards refresh. |
 | `kubi.preserveCacheAfterUpdates` | `true` | Keep cached dashboard data when the extension updates, so the first dashboard opened after an update paints immediately. Turn it off if you would rather each update start empty: a view cached by an older build can paint blank cells until its first refresh replaces it. Also on the About page. |
 

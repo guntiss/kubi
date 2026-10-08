@@ -76,6 +76,14 @@
      */
     openReasons: new Set(),
     /**
+     * The cluster's warning events as issues, polled in the background by the
+     * extension whichever page is open, with each one's read state. `mode` is
+     * `kubi.eventNotifications`, and null until the first message, so no bell
+     * is drawn before the extension has said whether there should be one.
+     * @type {{issues: any[], muted: string[], mode: string | null, generated: number}}
+     */
+    notifications: { issues: [], muted: [], mode: null, generated: 0 },
+    /**
      * What the extension's cache is holding, as { entries, bytes }. Arrives on
      * its own message rather than inside `about`, since the About payload is
      * itself cached and would report a size frozen at the time it was stored.
@@ -696,6 +704,8 @@
     restoreSearchFocus(caret);
     syncNsMenu();
     syncKindMenu();
+    // The bell was rebuilt with the toolbar, and may have moved with it.
+    placeNotifPanel();
   }
 
   /** The filter box, if it is on screen. */
@@ -1386,6 +1396,9 @@
     namespaces: '<path d="M7 3H5a2 2 0 0 0-2 2v2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/>'
       + '<path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="8" y="8" width="8" height="8" rx="1.5"/>',
     events: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+    bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+    bellOff: '<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/>'
+      + '<path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>',
     pods: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4'
       + 'A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
     deployments: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/>'
@@ -2281,6 +2294,8 @@
     children.push(renderFreshness());
     if (filters) children.push(renderColumnsButton());
     if (SHOW_REFRESH_BUTTON) children.push(renderRefresh());
+    const bell = renderBell();
+    if (bell) children.push(bell);
     return el('div', { class: 'toolbar' }, ...children);
   }
 
@@ -2745,7 +2760,7 @@
       pods.length ? renderUnhealthyPods(pods) : null,
       overview.rows.length
         ? el('div', { class: 'ov-section' },
-          ovHeading('Warning events', overview.rows.length),
+          renderEventsHeading(overview),
           el('div', { class: 'ov-groups' }, ...overview.groups.map(renderReasonGroup)))
         : null
     );
@@ -2754,18 +2769,46 @@
   /** The figures that answer "how bad is it" before anything is read. */
   function renderOverviewSummary(overview, pods) {
     const total = overview.podTotal;
+    // Issues rather than event records: what is read or unread is one object's
+    // one reason, however many records the cluster wrote about it. A payload
+    // cached before issues existed carries no keys and counts warnings as it did.
+    const issues = new Set(overview.rows.map((row) => row.issue).filter(Boolean));
+    const unread = [...issues].filter((key) => isUnread(key)).length;
     return el('div', { class: 'ov-summary' },
       ovStat(String(pods.length),
         count(pods.length, 'pod') + ' unhealthy',
         pods.length ? 'bad' : 'ok',
         total ? `of ${count(total, 'pod')} in the cluster` : undefined),
-      ovStat(String(overview.rows.length), count(overview.rows.length, 'warning'),
-        overview.rows.length ? 'warn' : undefined),
+      issues.size
+        ? ovStat(String(unread), `unread of ${count(issues.size, 'warning')}`, unread ? 'warn' : undefined,
+          `${count(overview.rows.length, 'warning event')} about ${count(issues.size, 'object and reason', 'objects and reasons')}`)
+        : ovStat(String(overview.rows.length), count(overview.rows.length, 'warning'),
+          overview.rows.length ? 'warn' : undefined),
       ovStat(String(overview.groups.length), count(overview.groups.length, 'distinct reason')),
       ovStat(String(overview.namespaces.length),
         count(overview.namespaces.length, 'namespace') + ' affected',
         undefined, overview.namespaces.join(', '))
     );
+  }
+
+  /**
+   * The events section's title, with Mark all read beside it while anything
+   * on the page is unread — the same as the bell's, here because this is the
+   * page where a backlog gets worked through.
+   */
+  function renderEventsHeading(overview) {
+    const heading = ovHeading('Warning events', overview.rows.length);
+    if (overview.rows.some((row) => isUnread(row.issue))) {
+      heading.append(
+        el('span', { class: 'spacer' }),
+        el('button', {
+          class: 'link-button',
+          text: 'Mark all read',
+          onclick: () => post({ type: 'markAllEventsRead' })
+        })
+      );
+    }
+    return heading;
   }
 
   /** A section title with the count it covers, so neither list is a surprise. */
@@ -2836,8 +2879,8 @@
   }
 
   /** "1 warning" / "4 warnings", so the summary never reads "1 warnings". */
-  function count(n, noun) {
-    return `${n} ${noun}${n === 1 ? '' : 's'}`;
+  function count(n, noun, plural) {
+    return `${n} ${n === 1 ? noun : plural || noun + 's'}`;
   }
 
   /**
@@ -2852,6 +2895,7 @@
     // single event can be in the hundreds on its own.
     const occurrences = group.count;
 
+    const unread = group.rows.some((row) => isUnread(row.issue));
     const head = el('button', {
       class: 'ov-group-head',
       'aria-expanded': String(open),
@@ -2863,6 +2907,8 @@
     },
       el('span', { class: 'ov-caret', text: open ? '▾' : '▸' }),
       el('span', { class: 'ov-reason', text: group.reason }),
+      unread ? el('span', { class: 'unread-dot', title: 'Unread' }) : null,
+      isMuted(group.reason) ? el('span', { class: 'ov-muted', text: 'muted', title: 'Not notified about on this cluster' }) : null,
       el('span', { class: 'ov-count', title: `${occurrences} occurrence${occurrences === 1 ? '' : 's'} across ${count(group.rows.length, 'event')}` },
         String(occurrences)),
       el('span', { class: 'ov-newest' },
@@ -2876,7 +2922,7 @@
       )
     );
 
-    return el('div', { class: 'ov-group' + (open ? ' open' : '') },
+    return el('div', { class: 'ov-group' + (open ? ' open' : '') + (isMuted(group.reason) ? ' muted' : '') },
       head,
       open ? el('div', { class: 'ov-events' }, ...group.rows.map(renderOverviewEvent)) : null
     );
@@ -2884,8 +2930,10 @@
 
   /** One occurrence: where, what it said, and when it was last seen. */
   function renderOverviewEvent(row) {
-    return el('div', { class: 'ov-event' },
+    const unread = isUnread(row.issue);
+    return el('div', { class: 'ov-event' + (unread ? ' unread' : '') },
       el('div', { class: 'ov-event-head' },
+        unread ? el('span', { class: 'unread-dot', title: 'Unread' }) : null,
         row.namespace
           ? el('span', { class: 'ov-ns', text: row.namespace })
           : null,
@@ -2899,7 +2947,16 @@
           title: formatTimestamp(row.created),
           'data-age-from': row.created || undefined,
           'data-age-suffix': ' ago'
-        }, row.created ? formatAge(row.created) + ' ago' : '')
+        }, row.created ? formatAge(row.created) + ' ago' : ''),
+        unread
+          ? el('button', {
+              class: 'icon-button mark-read',
+              title: 'Mark read',
+              'aria-label': 'Mark read',
+              text: '✓',
+              onclick: () => post({ type: 'markEventsRead', keys: [row.issue] })
+            })
+          : null
       ),
       el('div', { class: 'ov-message', text: row.cells.message || '' })
     );
@@ -7627,6 +7684,396 @@
     post({ type: 'load', kind: state.active });
   }
 
+  // ---------- notifications ----------
+
+  /**
+   * Warning events reach every page through three things: the bell in the
+   * toolbar with the unread count, the panel it opens, and a toast when
+   * something new turns up. The extension polls and decides what is read;
+   * this side only draws it and asks for changes.
+   *
+   * Toasts are kept rare on purpose. Only an issue that *becomes* unread
+   * while the dashboard is open gets one — whatever was already unread when
+   * it opened is the bell's to report — several arriving together share one,
+   * and after a toast the next waits a minute. None are shown on the Overview
+   * or the Events table, which already have the reader looking at events.
+   */
+
+  /** How long a toast stays up, unless the pointer is resting on it. */
+  const TOAST_MS = 8 * 1000;
+
+  /** The least time between two toasts; anything new in between waits in the bell. */
+  const TOAST_GAP_MS = 60 * 1000;
+
+  /**
+   * The keys unread at the last fresh snapshot, or null before the first.
+   * An unread key missing from it is new — first seen, or back after being
+   * read — and is what a toast is for.
+   * @type {Set<string> | null}
+   */
+  let seenUnread = null;
+
+  /** The bell's panel while it is open; it lives on the body, outside #app. */
+  let notifPanel = null;
+
+  /** Whether the panel's Earlier section, the read issues, is unfolded. */
+  let notifShowRead = false;
+
+  /** The toast on screen, if any, and its hide timer. */
+  let toast = null;
+  let lastToastAt = 0;
+
+  const toastHost = document.body.appendChild(el('div', { class: 'toast-host', 'aria-live': 'polite' }));
+
+  function isUnread(key) {
+    return Boolean(key) && state.notifications.issues.some((issue) => issue.key === key && issue.unread);
+  }
+
+  function isMuted(reason) {
+    return state.notifications.muted.includes(reason);
+  }
+
+  function onNotifications(message) {
+    state.notifications = {
+      issues: message.issues || [],
+      muted: message.muted || [],
+      mode: message.mode || 'toasts',
+      generated: message.generated || 0
+    };
+    // Only a fetch says what is new. A snapshot replayed from the cache is the
+    // last session's; taking the first fresh one as the baseline is what keeps
+    // opening a dashboard on a noisy cluster from greeting it with a toast.
+    if (message.fresh) {
+      const unread = state.notifications.issues.filter((issue) => issue.unread);
+      if (seenUnread) {
+        const arrived = unread.filter((issue) => !seenUnread.has(issue.key));
+        if (arrived.length) maybeToast(arrived);
+      }
+      seenUnread = new Set(unread.map((issue) => issue.key));
+    }
+    // A toast whose issues were all read elsewhere has nothing left to say.
+    if (toast && !toast.keys.some(isUnread)) dismissToast();
+    if (state.notifications.mode === 'off') closeNotifPanel();
+    renderBellOnly();
+    if (notifPanel) renderNotifPanel();
+    if (state.active === 'overview' && state.overview) renderContentOnly();
+  }
+
+  function unreadIssues() {
+    return state.notifications.issues.filter((issue) => issue.unread);
+  }
+
+  /**
+   * The toolbar's bell, with the unread count. The badge takes the colour of
+   * the worst unread issue; with nothing unread there is no badge at all,
+   * just the bell, so a quiet cluster leaves the toolbar quiet.
+   */
+  function renderBell() {
+    if (!state.notifications.mode || state.notifications.mode === 'off') return null;
+    const unread = unreadIssues();
+    const bad = unread.some((issue) => issue.health === 'bad');
+    const label = unread.length ? count(unread.length, 'unread warning') : 'No unread warnings';
+    return el('button', {
+      class: 'bell' + (notifPanel ? ' open' : ''),
+      title: label,
+      'aria-label': label,
+      'aria-haspopup': 'dialog',
+      'aria-expanded': String(Boolean(notifPanel)),
+      onclick: () => (notifPanel ? closeNotifPanel() : openNotifPanel())
+    },
+      icon('bell', 'bell-mark'),
+      unread.length
+        ? el('span', { class: 'bell-badge ' + (bad ? 'bad' : 'warn'), text: unread.length > 99 ? '99+' : String(unread.length) })
+        : null
+    );
+  }
+
+  /** Swaps the bell in place, so a poll never rebuilds the page under the reader. */
+  function renderBellOnly() {
+    const old = app.querySelector('.toolbar .bell');
+    const next = renderBell();
+    if (old && next) old.replaceWith(next);
+    else if (old) old.remove();
+    else if (next) app.querySelector('.toolbar')?.appendChild(next);
+  }
+
+  function openNotifPanel() {
+    if (notifPanel) return;
+    dismissToast();
+    closeRowMenu();
+    notifPanel = el('div', { class: 'notif-panel', role: 'dialog', 'aria-label': 'Events' });
+    document.body.appendChild(notifPanel);
+    renderNotifPanel();
+    renderBellOnly();
+  }
+
+  function closeNotifPanel() {
+    if (!notifPanel) return;
+    notifPanel.remove();
+    notifPanel = null;
+    renderBellOnly();
+  }
+
+  /** Hangs the panel under the bell, right edges aligned, and keeps it inside the window. */
+  function placeNotifPanel() {
+    const bell = app.querySelector('.toolbar .bell');
+    if (!notifPanel || !bell) return;
+    const box = bell.getBoundingClientRect();
+    notifPanel.style.top = `${box.bottom + 6}px`;
+    notifPanel.style.right = `${Math.max(8, window.innerWidth - box.right)}px`;
+    notifPanel.style.maxHeight = `${Math.max(160, window.innerHeight - box.bottom - 18)}px`;
+  }
+
+  /**
+   * The panel's contents: the unread issues newest first, the read ones
+   * folded under Earlier, the reasons muted on this cluster, and the way on
+   * to the Overview or the whole Events table. Rebuilt on every snapshot,
+   * keeping the list's scroll.
+   */
+  function renderNotifPanel() {
+    if (!notifPanel) return;
+    const scroll = notifPanel.querySelector('.notif-list')?.scrollTop ?? 0;
+    const { issues, muted } = state.notifications;
+    const unread = issues.filter((issue) => issue.unread);
+    const read = issues.filter((issue) => !issue.unread);
+
+    const list = el('div', { class: 'notif-list' });
+    if (unread.length) {
+      list.append(...unread.map(renderNotifRow));
+    } else {
+      list.append(el('div', { class: 'notif-empty' },
+        el('div', { text: '✓ No unread warnings' }),
+        el('div', { class: 'notif-empty-detail', text: read.length
+          ? 'Anything already read comes back if it recurs after an hour of quiet.'
+          : 'Kubi checks for new warning events in the background while a dashboard is open.' })
+      ));
+    }
+    if (read.length) {
+      list.append(el('button', {
+        class: 'notif-fold',
+        'aria-expanded': String(notifShowRead),
+        onclick: () => {
+          notifShowRead = !notifShowRead;
+          renderNotifPanel();
+        }
+      },
+        el('span', { class: 'ov-caret', text: notifShowRead ? '▾' : '▸' }),
+        el('span', { text: 'Earlier' }),
+        el('span', { class: 'ov-heading-count', text: String(read.length) })
+      ));
+      if (notifShowRead) list.append(...read.map(renderNotifRow));
+    }
+
+    notifPanel.textContent = '';
+    // Filtered, because the DOM's own `append` — unlike `el` — writes a null
+    // child out as the text "null", which the muted row is when nothing is.
+    notifPanel.append(...[
+      el('div', { class: 'notif-head' },
+        el('span', { class: 'notif-title', text: 'Warning events' }),
+        el('span', { class: 'spacer' }),
+        unread.length
+          ? el('button', {
+              class: 'link-button',
+              text: 'Mark all read',
+              onclick: () => post({ type: 'markAllEventsRead' })
+            })
+          : null
+      ),
+      list,
+      muted.length
+        ? el('div', { class: 'notif-muted' },
+          el('span', { class: 'notif-muted-label', text: 'Muted' }),
+          ...muted.map((reason) => el('span', { class: 'notif-chip' },
+            el('span', { text: reason }),
+            el('button', {
+              class: 'icon-button',
+              title: `Notify about ${reason} again`,
+              'aria-label': `Unmute ${reason}`,
+              text: '✕',
+              onclick: () => post({ type: 'muteEventReason', reason, muted: false })
+            })
+          )))
+        : null,
+      el('div', { class: 'notif-foot' },
+        el('button', { class: 'link-button', text: 'Overview', onclick: () => { closeNotifPanel(); select('overview'); } }),
+        el('button', { class: 'link-button', text: 'All events', onclick: () => { closeNotifPanel(); select('events'); } })
+      )
+    ].filter(Boolean));
+    placeNotifPanel();
+    const next = notifPanel.querySelector('.notif-list');
+    if (next) next.scrollTop = scroll;
+  }
+
+  /**
+   * One issue: its reason and how often, where, what it last said and when.
+   * Clicking it reads it and goes to the object; the buttons on the right
+   * read it or mute its reason without going anywhere.
+   */
+  function renderNotifRow(issue) {
+    const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
+    return el('div', {
+      class: 'notif-row' + (issue.unread ? ' unread' : '') + (issue.muted ? ' muted' : ''),
+      role: 'button',
+      tabindex: '0',
+      title: issue.link ? 'Open ' + issue.object : 'Show in Events',
+      onclick: () => openIssue(issue),
+      onkeydown: (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openIssue(issue);
+        }
+      }
+    },
+      el('span', { class: 'notif-dot ' + issue.health }),
+      el('div', { class: 'notif-body' },
+        el('div', { class: 'notif-line' },
+          el('span', { class: 'notif-reason', text: issue.reason }),
+          issue.count > 1 ? el('span', { class: 'ov-repeat', title: 'Times the cluster saw this', text: '×' + issue.count }) : null,
+          el('span', { class: 'spacer' }),
+          issue.lastSeen
+            ? el('span', {
+                class: 'ov-age',
+                title: formatTimestamp(issue.lastSeen),
+                'data-age-from': issue.lastSeen,
+                'data-age-suffix': ' ago'
+              }, formatAge(issue.lastSeen) + ' ago')
+            : null
+        ),
+        el('div', { class: 'notif-object' },
+          issue.namespace ? el('span', { class: 'ov-ns', text: issue.namespace }) : null,
+          el('span', { class: 'ov-object', text: issue.object })
+        ),
+        issue.message ? el('div', { class: 'notif-message', text: issue.message }) : null
+      ),
+      el('div', { class: 'notif-actions' },
+        issue.unread
+          ? el('button', {
+              class: 'icon-button',
+              title: 'Mark read',
+              'aria-label': 'Mark read',
+              text: '✓',
+              onclick: stop(() => post({ type: 'markEventsRead', keys: [issue.key] }))
+            })
+          : null,
+        el('button', {
+          class: 'icon-button',
+          title: issue.muted ? `Notify about ${issue.reason} again` : `Never notify about ${issue.reason} on this cluster`,
+          'aria-label': issue.muted ? `Unmute ${issue.reason}` : `Mute ${issue.reason}`,
+          onclick: stop(() => post({ type: 'muteEventReason', reason: issue.reason, muted: !issue.muted }))
+        }, icon(issue.muted ? 'bell' : 'bellOff', 'notif-icon'))
+      )
+    );
+  }
+
+  /**
+   * Reads an issue and opens what it is about: the object itself, with its
+   * details open, when Kubi lists its kind; otherwise the Events table,
+   * filtered to the object's name.
+   */
+  function openIssue(issue) {
+    if (issue.unread) post({ type: 'markEventsRead', keys: [issue.key] });
+    closeNotifPanel();
+    dismissToast();
+    if (issue.link && kindOf(issue.link.kind)) {
+      goTo(issue.link);
+      return;
+    }
+    select('events');
+    state.filter = issue.object.split('/').pop() || issue.object;
+    render();
+  }
+
+  function maybeToast(issues) {
+    if (state.notifications.mode !== 'toasts' || document.hidden || notifPanel) return;
+    if (state.active === 'overview' || state.active === 'events') return;
+    if (Date.now() - lastToastAt < TOAST_GAP_MS) return;
+    lastToastAt = Date.now();
+    showToast(issues);
+  }
+
+  /**
+   * One toast, for one new issue or several. A single issue is shown whole
+   * and View goes to it; several are counted, with their reasons, and Show
+   * opens the bell's panel where they are listed.
+   */
+  function showToast(issues) {
+    dismissToast();
+    const keys = issues.map((issue) => issue.key);
+    const single = issues.length === 1 ? issues[0] : null;
+    const health = issues.some((issue) => issue.health === 'bad') ? 'bad' : 'warn';
+    const reasons = [...new Set(issues.map((issue) => issue.reason))];
+    const body = single
+      ? [
+          el('div', { class: 'toast-title' },
+            el('span', { class: 'notif-dot ' + health }),
+            el('span', { class: 'notif-reason', text: single.reason }),
+            el('span', { class: 'toast-object' },
+              single.namespace ? el('span', { class: 'ov-ns', text: single.namespace }) : null,
+              el('span', { class: 'ov-object', text: single.object }))
+          ),
+          single.message ? el('div', { class: 'notif-message', text: single.message }) : null
+        ]
+      : [
+          el('div', { class: 'toast-title' },
+            el('span', { class: 'notif-dot ' + health }),
+            el('span', { class: 'notif-reason', text: `${issues.length} new warnings` })
+          ),
+          el('div', { class: 'notif-message', text: reasons.length > 3
+            ? `${reasons.slice(0, 3).join(', ')} and ${reasons.length - 3} more`
+            : reasons.join(', ') })
+        ];
+    const node = el('div', {
+      class: 'toast ' + health,
+      role: 'status',
+      onmouseenter: () => clearTimeout(toast && toast.timer),
+      onmouseleave: () => armToast()
+    },
+      el('div', { class: 'toast-body' }, ...body),
+      el('div', { class: 'toast-actions' },
+        single
+          ? el('button', { class: 'link-button', text: 'View', onclick: () => openIssue(single) })
+          : el('button', { class: 'link-button', text: 'Show', onclick: () => openNotifPanel() }),
+        el('button', {
+          class: 'link-button',
+          text: 'Mark read',
+          onclick: () => {
+            post({ type: 'markEventsRead', keys });
+            dismissToast();
+          }
+        })
+      ),
+      el('button', { class: 'icon-button toast-close', title: 'Dismiss', 'aria-label': 'Dismiss', text: '✕', onclick: dismissToast })
+    );
+    toastHost.appendChild(node);
+    toast = { node, keys, timer: 0 };
+    armToast();
+  }
+
+  function armToast() {
+    if (!toast) return;
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(dismissToast, TOAST_MS);
+  }
+
+  /** Takes the toast down. Leaves its issues unread: dismissing is not reading. */
+  function dismissToast() {
+    if (!toast) return;
+    clearTimeout(toast.timer);
+    toast.node.remove();
+    toast = null;
+  }
+
+  // The panel closes on a press anywhere outside it, as a menu does; the bell
+  // is left to toggle it on its own click. A resize would leave it hanging
+  // where the bell used to be, so it follows.
+  document.addEventListener('mousedown', (e) => {
+    if (!notifPanel || notifPanel.contains(e.target)) return;
+    const bell = app.querySelector('.toolbar .bell');
+    if (bell && bell.contains(e.target)) return;
+    closeNotifPanel();
+  }, true);
+  window.addEventListener('resize', () => placeNotifPanel());
+
   // ---------- messages ----------
 
   window.addEventListener('message', (event) => {
@@ -7841,6 +8288,9 @@
         state.generated = message.generated;
         render();
         break;
+      case 'notifications':
+        onNotifications(message);
+        break;
       case 'reveal':
         // Jump to one object's table, narrowed to its name. The extension sends
         // this for a Job it has just created, so the row is found by the
@@ -8041,6 +8491,11 @@
       return;
     }
 
+    if (e.key === 'Escape' && notifPanel) {
+      closeNotifPanel();
+      return;
+    }
+
     if (e.key === 'Escape' && state.selected) {
       selectRow(null);
       renderContentOnly();
@@ -8180,7 +8635,9 @@
    */
   setInterval(() => {
     if (document.hidden) return;
-    for (const cell of app.querySelectorAll('[data-age-from]')) {
+    // The whole document: the bell's panel and the toasts live on the body,
+    // outside #app, and their ages tick like the rest.
+    for (const cell of document.querySelectorAll('[data-age-from]')) {
       // A table cell reads "5m"; a detail line reads "5m ago". The suffix rides
       // along on the element so the ticker doesn't have to know which is which.
       const next = (cell.getAttribute('data-age-prefix') ?? '')

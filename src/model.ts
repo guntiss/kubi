@@ -1424,6 +1424,23 @@ function eventHealth(type: string, reason: string): Health {
   return type === 'Warning' ? 'warn' : 'muted';
 }
 
+/**
+ * Normal events still worth raising: the cluster taking a workload away. The
+ * same set as DISRUPTIVE_EVENTS less `Killing` and `Preempting`, which every
+ * rollout and every preemption's other half produce — notifying on them
+ * would announce each deploy as a problem.
+ */
+const NOTIFY_NORMAL = /^(Preempted|Evicted|NodeNotReady|TaintManagerEviction)$/;
+
+/**
+ * Whether an event row is something to tell the user about wherever they are
+ * in the dashboard, and what the Overview lists. Every Warning, plus the
+ * Normal events above.
+ */
+export function notifiable(row: Row): boolean {
+  return row.status === 'Warning' || NOTIFY_NORMAL.test(row.cells.reason ?? '');
+}
+
 function buildEvent(event: k.KubeObject): Built {
   const type = (event as any).type ?? 'Normal';
   const reason = (event as any).reason ?? '';

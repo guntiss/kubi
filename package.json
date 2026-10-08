@@ -145,6 +145,21 @@
           "default": "active",
           "description": "Which editor group a new dashboard opens in. Reopening a context that already has a dashboard reveals that one where it is."
         },
+        "kubi.eventNotifications": {
+          "type": "string",
+          "enum": [
+            "toasts",
+            "badge",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Show a bell with the number of unread warnings on every page, and a brief toast when a new one appears.",
+            "Show the bell and its count, but no toasts.",
+            "No bell and no background polling for events. The Overview still lists warnings when opened."
+          ],
+          "default": "toasts",
+          "markdownDescription": "How warning events reach you outside the Overview. Events are fetched in the background while a dashboard is open; an issue marked read stays quiet until it recurs after an hour of silence."
+        },
         "kubi.dragToSelect": {
           "type": "boolean",
           "default": true,
