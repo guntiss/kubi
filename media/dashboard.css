@@ -2069,7 +2069,7 @@ tbody td.empty-cell .state { padding: 40px 20px; }
  * glyphs clickable while collapsed; only the words go away.
  */
 body.rail-collapsed {
-  --rail-width: 52px;
+  --rail-width: 48px;
 }
 body.rail-collapsed .label-text,
 body.rail-collapsed .rail-subhead,
@@ -2085,13 +2085,13 @@ body.rail-collapsed .brand .name {
 body.rail-collapsed .nav-item {
   justify-content: center;
   min-height: 34px;
-  margin: 2px 7px;
+  margin: 2px 6px;
   padding: 0;
 }
-body.rail-collapsed .nav-item.active::before { left: -7px; }
+body.rail-collapsed .nav-item.active::before { left: -6px; }
 body.rail-collapsed .nav-item .glyph { width: 18px; height: 18px; }
 /* Go to shrinks to its magnifier, a glyph like the rest of the strip. */
-body.rail-collapsed .rail-jump-row { padding: 0 7px 8px; }
+body.rail-collapsed .rail-jump-row { padding: 0 6px 8px; }
 body.rail-collapsed button.rail-jump {
   justify-content: center;
   min-height: 34px;
