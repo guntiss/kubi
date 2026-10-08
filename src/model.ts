@@ -25,6 +25,18 @@ export interface Column {
    * where nothing sets limits would otherwise get a column of blanks.
    */
   share?: boolean;
+  /**
+   * A column the user added to show one label's value, keyed `label:<labelKey>`
+   * and named as they chose: `node.kubernetes.io/instance-type` as "SKU". Only
+   * these labels ride on a row, as cells, rather than every label the object
+   * has, which on the pod table would be most of each row's bytes.
+   */
+  labelKey?: string;
+}
+
+/** The cell key a label column reads; see `Column.labelKey`. */
+export function labelCellKey(labelKey: string): string {
+  return `label:${labelKey}`;
 }
 
 /** The part of a pod's reading that its partial ceiling is measured against. */
@@ -893,7 +905,7 @@ export function kindById(id: string): ResourceKind | undefined {
   return KINDS.find((kind) => kind.id === id);
 }
 
-export function toRow(kindId: string, object: k.KubeObject, refs: Refs = {}): Row {
+export function toRow(kindId: string, object: k.KubeObject, refs: Refs = {}, labelKeys: string[] = []): Row {
   const base = { name: object.metadata.name, namespace: object.metadata.namespace };
   const built = build(kindId, object, refs);
   const owner = ownerOf(object);
@@ -903,6 +915,11 @@ export function toRow(kindId: string, object: k.KubeObject, refs: Refs = {}): Ro
     age: age(object.metadata.creationTimestamp),
     ...built.cells
   };
+  // The user's label columns. Set before `search` is built from the cells, so
+  // typing a label's value finds the row like any other cell's.
+  for (const key of labelKeys) {
+    cells[labelCellKey(key)] = object.metadata.labels?.[key] ?? '';
+  }
   return {
     ...base,
     // `created` is what the webview recomputes the live age cell from. For an

@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import * as k from './kubectl';
 import { DashboardCache } from './cache';
 import { metricsFor } from './metrics';
-import { GROUPS, KINDS, RAIL_DEFAULT, REFERENCES, Refs, Row, kindById, skew, toRow } from './model';
+import { Column, GROUPS, KINDS, RAIL_DEFAULT, REFERENCES, Refs, ResourceKind, Row, kindById, labelCellKey, skew, toRow } from './model';
 
 /** Rail collapse is a global layout preference, shared by every context's panel. */
 const RAIL_COLLAPSED_KEY = 'kubi.railCollapsed';
@@ -27,6 +27,22 @@ const RAIL_MORE_KEY = 'kubi.railMore';
  * later release still turns up in a table someone has already rearranged.
  */
 const COLUMN_LAYOUTS_KEY = 'kubi.columnLayouts';
+
+/**
+ * The label columns the user has added, by kind id, in the order added. Global
+ * like the layouts: a label such as `node.kubernetes.io/instance-type` means the
+ * same on every cluster, and one that lacks it shows the column blank.
+ */
+const LABEL_COLUMNS_KEY = 'kubi.labelColumns';
+
+/** One label column: the label it reads and the name its header shows. */
+interface LabelColumn {
+  key: string;
+  label: string;
+}
+
+/** How many of a label's values the picker shows beside its key. */
+const LABEL_SAMPLES = 3;
 
 /** One table's arrangement; see COLUMN_LAYOUTS_KEY. */
 interface ColumnLayout {
@@ -86,6 +102,10 @@ type Inbound =
   | { type: 'setRailMore'; open: boolean }
   /** A table's columns were moved, resized, shown or hidden; null resets them. */
   | { type: 'setColumnLayout'; kind: string; layout: ColumnLayout | null }
+  /** The column menu's Add label column…: the picker and the name are asked for here. */
+  | { type: 'addLabelColumn'; kind: string }
+  | { type: 'renameLabelColumn'; kind: string; key: string }
+  | { type: 'removeLabelColumn'; kind: string; key: string }
   | { type: 'describe'; kind: string; name: string; namespace?: string }
   /** The events section of the details tab: what happened to this one object. */
   | { type: 'events'; kind: string; name: string; namespace?: string }
@@ -213,6 +233,12 @@ export class DashboardPanel {
   }
 
   private readonly disposables: vscode.Disposable[] = [];
+  /**
+   * The labels seen on each kind's objects at its last load, with a few of
+   * their values, for the label column picker. Gathered from the list the
+   * table was built from, so offering them costs no fetch of its own.
+   */
+  private readonly seenLabels = new Map<string, Map<string, string[]>>();
   private namespace: string | undefined;
   private activeKind = 'overview';
   private refreshTimer: NodeJS.Timeout | undefined;
@@ -720,6 +746,15 @@ export class DashboardPanel {
         }
         break;
       }
+      case 'addLabelColumn':
+        await this.addLabelColumn(message.kind);
+        break;
+      case 'renameLabelColumn':
+        await this.renameLabelColumn(message.kind, message.key);
+        break;
+      case 'removeLabelColumn':
+        await this.saveLabelColumns(message.kind, this.labelColumns(message.kind).filter((c) => c.key !== message.key));
+        break;
       case 'describe':
         await this.describe(message);
         break;
@@ -799,7 +834,7 @@ export class DashboardPanel {
     this.stopLogs();
     this.post({
       type: 'init',
-      kinds: KINDS,
+      kinds: this.kindsWithLabelColumns(),
       groups: GROUPS,
       context: this.contextName,
       allNamespaces: k.ALL_NAMESPACES,
@@ -1186,6 +1221,130 @@ export class DashboardPanel {
     return refs;
   }
 
+  /** A kind's label columns, as stored; see LABEL_COLUMNS_KEY. */
+  private labelColumns(kindId: string): LabelColumn[] {
+    const stored = this.extension.globalState.get<Record<string, LabelColumn[]>>(LABEL_COLUMNS_KEY, {});
+    const columns = stored[kindId];
+    return Array.isArray(columns) ? columns.filter((c) => c && typeof c.key === 'string' && typeof c.label === 'string') : [];
+  }
+
+  /**
+   * `KINDS` as the webview draws them: each kind's declared columns with the
+   * user's label columns put in before Age, which stays last as it is on every
+   * other table. A layout saved before a label column was added has no place
+   * for it, and `orderedColumns` in the webview puts it after the column it
+   * follows here.
+   */
+  private kindsWithLabelColumns(): ResourceKind[] {
+    return KINDS.map((kind) => {
+      const added = this.labelColumns(kind.id);
+      if (!added.length) return kind;
+      const extra: Column[] = added.map((c) => ({ key: labelCellKey(c.key), label: c.label, labelKey: c.key }));
+      const at = kind.columns.findIndex((c) => c.key === 'age');
+      const columns = at === -1
+        ? [...kind.columns, ...extra]
+        : [...kind.columns.slice(0, at), ...extra, ...kind.columns.slice(at)];
+      return { ...kind, columns };
+    });
+  }
+
+  /**
+   * Stores a kind's label columns and hands every open dashboard the kinds
+   * again. A dashboard showing that kind reloads it, since its rows were built
+   * without the new column's cells; that is one list call, the same one the
+   * next auto-refresh would make.
+   */
+  private async saveLabelColumns(kindId: string, columns: LabelColumn[]): Promise<void> {
+    const stored = { ...this.extension.globalState.get<Record<string, LabelColumn[]>>(LABEL_COLUMNS_KEY, {}) };
+    if (columns.length) {
+      stored[kindId] = columns;
+    } else {
+      delete stored[kindId];
+    }
+    await this.extension.globalState.update(LABEL_COLUMNS_KEY, stored);
+    for (const panel of [...DashboardPanel.open.values()].flat()) {
+      panel.post({ type: 'kinds', kinds: panel.kindsWithLabelColumns() });
+      if (panel.activeKind === kindId) void panel.load(kindId, true);
+    }
+  }
+
+  /**
+   * Asks for a label, from those seen on the kind's objects or typed in, then
+   * for the name its column goes by.
+   */
+  private async addLabelColumn(kindId: string): Promise<void> {
+    const kind = kindById(kindId);
+    if (!kind) return;
+    const existing = this.labelColumns(kindId);
+    const taken = new Set(existing.map((c) => c.key));
+    const seen = [...(this.seenLabels.get(kindId) ?? new Map<string, string[]>()).entries()]
+      .filter(([key]) => !taken.has(key))
+      .sort(([a], [b]) => a.localeCompare(b));
+    const listed: vscode.QuickPickItem[] = seen.map(([key, values]) => ({ label: key, description: values.join(', ') }));
+
+    const key = await new Promise<string | undefined>((resolve) => {
+      const pick = vscode.window.createQuickPick();
+      pick.title = `Add label column to ${kind.label}`;
+      pick.placeholder = listed.length
+        ? 'Pick a label, or type its key'
+        : `Type a label key: no labels were seen on the ${kind.label.toLowerCase()} listed last`;
+      pick.matchOnDescription = true;
+      pick.items = listed;
+      // A key no object has yet — the column waits for one — is offered as
+      // typed, so the picker is not limited to what this cluster happens to use.
+      pick.onDidChangeValue((value) => {
+        const typed = value.trim();
+        const offer = LABEL_KEY.test(typed) && !taken.has(typed) && !listed.some((item) => item.label === typed);
+        pick.items = offer ? [{ label: typed, description: 'Label key as typed' }, ...listed] : listed;
+      });
+      pick.onDidAccept(() => {
+        resolve(pick.selectedItems[0]?.label);
+        pick.hide();
+      });
+      pick.onDidHide(() => {
+        resolve(undefined);
+        pick.dispose();
+      });
+      pick.show();
+    });
+    if (!key) return;
+
+    const label = await this.askColumnName(kind, key, key.slice(key.lastIndexOf('/') + 1));
+    if (!label) return;
+    await this.saveLabelColumns(kindId, [...existing.filter((c) => c.key !== key), { key, label }]);
+  }
+
+  private async renameLabelColumn(kindId: string, key: string): Promise<void> {
+    const kind = kindById(kindId);
+    const columns = this.labelColumns(kindId);
+    const column = columns.find((c) => c.key === key);
+    if (!kind || !column) return;
+    const label = await this.askColumnName(kind, key, column.label);
+    if (!label || label === column.label) return;
+    await this.saveLabelColumns(kindId, columns.map((c) => (c.key === key ? { key, label } : c)));
+  }
+
+  /** The header for label `key`'s column, which must not repeat another column's. */
+  private async askColumnName(kind: ResourceKind, key: string, value: string): Promise<string | undefined> {
+    const others = [
+      ...kind.columns.map((c) => c.label),
+      ...this.labelColumns(kind.id).filter((c) => c.key !== key).map((c) => c.label)
+    ].map((label) => label.toLowerCase());
+    const answer = await vscode.window.showInputBox({
+      title: `Column name for ${key}`,
+      prompt: `What the ${kind.label} table calls the column showing this label`,
+      value,
+      valueSelection: [0, value.length],
+      validateInput: (text) => {
+        const trimmed = text.trim();
+        if (!trimmed) return 'Enter a column name.';
+        if (others.includes(trimmed.toLowerCase())) return `The ${kind.label} table already has a column named "${trimmed}".`;
+        return undefined;
+      }
+    });
+    return answer?.trim() || undefined;
+  }
+
   private async loadKind(kindId: string, token: number, signal: AbortSignal): Promise<void> {
     const kind = kindById(kindId);
     if (!kind) {
@@ -1211,8 +1370,12 @@ export class DashboardPanel {
         return;
       }
       // A log is ordered by time; everything else reads as an inventory.
+      this.seenLabels.set(kind.id, labelsOf(items));
+      // Read now rather than when the load started, so a column added while
+      // the list was in flight is filled in by it.
+      const labelKeys = this.labelColumns(kind.id).map((c) => c.key);
       const rows = items
-        .map((item) => metrics.decorate(kind.id, toRow(kind.id, item, refs), item))
+        .map((item) => metrics.decorate(kind.id, toRow(kind.id, item, refs, labelKeys), item))
         .sort(kindId === 'events' ? byNewest : byNamespaceThenName);
       const generated = Date.now();
       this.cache.set(this.cacheKey(kindId), rows, generated);
@@ -1304,8 +1467,9 @@ export class DashboardPanel {
       // Every pod, built once. The whole list is what the Pods table shows, so
       // it is cached under that kind — the fetch has already been paid for, and
       // leaving it unsaved would have the Pods page repeat it.
+      const podLabelKeys = this.labelColumns('pods').map((c) => c.key);
       const podRows = podItems
-        .map((item) => metrics.decorate('pods', toRow('pods', item), item))
+        .map((item) => metrics.decorate('pods', toRow('pods', item, {}, podLabelKeys), item))
         .sort(byNamespaceThenName);
 
       // `muted` is a pod that finished its work — a completed Job's pod is not
@@ -2365,6 +2529,29 @@ function formatBytes(bytes: number): string {
     unit++;
   }
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+/**
+ * A label key as the API accepts one: an optional DNS-subdomain prefix and a
+ * slash, then a name of letters, digits, `-`, `_` and `.` that starts and ends
+ * with a letter or digit.
+ */
+const LABEL_KEY = /^(?:[a-z0-9]([-a-z0-9.]*[a-z0-9])?\/)?[A-Za-z0-9](?:[-A-Za-z0-9_.]*[A-Za-z0-9])?$/;
+
+/** Every label key on `items`, with up to LABEL_SAMPLES of its distinct values. */
+function labelsOf(items: k.KubeObject[]): Map<string, string[]> {
+  const seen = new Map<string, string[]>();
+  for (const item of items) {
+    for (const [key, value] of Object.entries(item.metadata.labels ?? {})) {
+      const values = seen.get(key);
+      if (!values) {
+        seen.set(key, [value]);
+      } else if (values.length < LABEL_SAMPLES && !values.includes(value)) {
+        values.push(value);
+      }
+    }
+  }
+  return seen;
 }
 
 function byNamespaceThenName(a: Row, b: Row): number {

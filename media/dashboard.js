@@ -3272,6 +3272,19 @@
   }
 
   /**
+   * QUERY_ALIASES, plus a label column's name for its key: `label:` and a
+   * label key's slash can't be typed as a field, so an "SKU" column is
+   * filtered as `sku:D2ds`. Spaces are dropped, since they split terms.
+   */
+  function queryAliases(kind) {
+    const aliases = { ...QUERY_ALIASES };
+    for (const column of kind ? kind.columns : []) {
+      if (column.labelKey) aliases[column.label.toLowerCase().replace(/\s+/g, '')] = column.key;
+    }
+    return aliases;
+  }
+
+  /**
    * Whitespace splits terms, except inside double quotes, so a value with a
    * space in it — reason:"Back-off restarting" — survives as one term.
    */
@@ -3287,12 +3300,12 @@
    * the term falls back to plain text, so a name that contains a colon still
    * finds itself rather than silently matching nothing.
    */
-  function parseTerm(raw, keys) {
+  function parseTerm(raw, keys, aliases) {
     const negated = raw.length > 1 && (raw.startsWith('-') || raw.startsWith('!'));
     const text = negated ? raw.slice(1) : raw;
     const scoped = /^([A-Za-z][\w.-]*):(.*)$/.exec(text);
     if (scoped) {
-      const key = QUERY_ALIASES[scoped[1].toLowerCase()] ?? scoped[1];
+      const key = aliases[scoped[1].toLowerCase()] ?? scoped[1];
       if (keys.has(key)) {
         const value = scoped[2].replace(/"/g, '');
         const compared = /^(>=|<=|>|<|=)(.+)$/.exec(value);
@@ -3306,8 +3319,9 @@
 
   function parseQuery(text, kind) {
     const keys = queryKeys(kind);
+    const aliases = queryAliases(kind);
     return splitTerms(text.trim())
-      .map((raw) => parseTerm(raw, keys))
+      .map((raw) => parseTerm(raw, keys, aliases))
       .filter((term) => term.value !== '');
   }
 
@@ -3879,6 +3893,25 @@
   }
 
   /**
+   * Drops a label column. Its place, width and visibility go from the layout
+   * too, so adding the label again later starts it afresh. The extension
+   * stores the change and sends the kinds back without the column.
+   */
+  function removeLabelColumn(kind, col) {
+    const layout = columnLayout(kind.id);
+    const visible = { ...layout.visible };
+    const widths = { ...layout.widths };
+    delete visible[col.key];
+    delete widths[col.key];
+    saveColumnLayout(kind.id, {
+      order: layout.order && layout.order.filter((key) => key !== col.key),
+      visible,
+      widths
+    });
+    post({ type: 'removeLabelColumn', kind: kind.id, key: col.labelKey });
+  }
+
+  /**
    * The header's context menu, and the toolbar's Columns button: every column
    * the table can show, ticked if it is, plus a way back to the defaults. On a
    * header it leads with what can be done to that column alone.
@@ -3904,6 +3937,18 @@
         title: 'Size the column to its content again, as double-clicking its edge does',
         run: () => resetColumnWidth(kind, col.key)
       });
+      if (col.labelKey) {
+        items.push({
+          label: 'Rename…',
+          title: `Change what the column showing ${col.labelKey} is called`,
+          run: () => post({ type: 'renameLabelColumn', kind: kind.id, key: col.labelKey })
+        });
+        items.push({
+          label: 'Remove column',
+          title: `Stop showing ${col.labelKey}. Add it again from Add label column…`,
+          run: () => removeLabelColumn(kind, col)
+        });
+      }
       items.push(null);
     }
     for (const c of availableColumns(kind)) {
@@ -3917,9 +3962,14 @@
     }
     items.push(null);
     items.push({
+      label: 'Add label column…',
+      title: `Show one of the ${kind.label.toLowerCase()}' labels as a column, under a name of your choosing`,
+      run: () => post({ type: 'addLabelColumn', kind: kind.id })
+    });
+    items.push({
       label: 'Reset columns',
       disabled: !state.columnLayouts[kind.id],
-      title: `Put the ${kind.label.toLowerCase()} table's columns back to their original order, widths and set`,
+      title: `Put the ${kind.label.toLowerCase()} table's columns back to their original order, widths and set. Label columns stay; each has its own Remove`,
       run: () => {
         saveColumnLayout(kind.id, {});
         renderContentOnly();
@@ -4379,6 +4429,8 @@
         col.key === 'message' ? 'message' : ''
       ].filter(Boolean).join(' '),
       'data-col': col.key,
+      // A label column's name is the user's; the label it reads is in the tooltip.
+      title: col.labelKey ? `Label ${col.labelKey}` : undefined,
       onclick: () => {
         // `state.sort` is read here rather than through `active` above: the
         // header survives refreshes now, so a flag captured when it was built
@@ -4635,7 +4687,8 @@
    * count alone would not catch a change that keeps the number the same.
    */
   function columnSignature(columns) {
-    return columns.map((c) => c.key).join(',');
+    // A label column's name is the user's to change, and a renamed header is a rebuild.
+    return columns.map((c) => (c.labelKey ? `${c.key}=${c.label}` : c.key)).join(',');
   }
 
   /**
@@ -7613,6 +7666,19 @@
         state.railKinds = message.kinds || null;
         renderRailOnly();
         break;
+      case 'kinds': {
+        // A label column added, renamed or removed, here or in another
+        // dashboard. The rows that fill it in follow from the extension.
+        state.kinds = message.kinds;
+        const kind = kindOf(state.active);
+        if (kind && !kind.columns.some((c) => c.key === state.sort.key)
+          && !['name', 'namespace', 'status'].includes(state.sort.key)) {
+          state.sort = defaultSort(kind.id);
+        }
+        renderContentOnly();
+        fitTable();
+        break;
+      }
       case 'columnLayouts':
         // Rearranged in another dashboard. The columns may differ, which the
         // reconciler turns into a rebuild; if only widths moved, the table on

@@ -104,6 +104,12 @@ hand to a coding agent with the whole thing in view.
   show columns or put a table back to its defaults. Each table remembers its
   layout, in every dashboard.
 
+  **Add label column…** in the same menu shows a label as a column under a name
+  you choose, such as `node.kubernetes.io/instance-type` as **SKU** on Nodes. It
+  offers the labels on the objects listed, with a few of their values, or takes
+  a key you type. The value is read from the list the table already fetches, so
+  it costs no extra calls. Right-click the header to rename or remove it.
+
 - **Detail drawer** — select a row for its fields plus actions: Describe, YAML,
   Logs, Shell, Pods, Port forward, Scale, Restart, Delete. Scale is offered on Deployments,
   StatefulSets and ReplicaSets, starting from the replica count currently set;
@@ -234,7 +240,8 @@ more than that:
 | `ns:prod restarts:>0` | terms combine with AND |
 
 Field names are the kind's own column keys, plus `name`, `namespace` and
-`status` on every kind. An unrecognized field is treated as plain text, so a name
+`status` on every kind. A label column is addressed by its name with spaces
+removed: `sku:D2ds`. An unrecognized field is treated as plain text, so a name
 containing a colon still finds itself. Press `/` or `Ctrl`/`Cmd`+`F` to jump to
 the box.
 
