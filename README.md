@@ -267,6 +267,7 @@ more than that:
 | --- | --- |
 | `web` | any row containing `web` |
 | `status:Running` | one column, case-insensitively |
+| `ns:=default` | the whole value only — leaves out `default-apps` |
 | `ns:kube-system` | `ns`, `n` and `s` are short for namespace, name, status |
 | `restarts:>3` | numbers compare — also `<`, `>=`, `<=`, `=` |
 | `age:<2h` | ages and ready ratios compare too: `age:>7d`, `ready:<1` |
@@ -281,6 +282,12 @@ Field names are the kind's own column keys, plus `name`, `namespace` and
 removed: `sku:D2ds`. An unrecognized field is treated as plain text, so a name
 containing a colon still finds itself. Press `/` or `Ctrl`/`Cmd`+`F` to jump to
 the box.
+
+A row's right-click menu has a **Filter** submenu that builds these for you from
+the row's values: **Only** or **Exclude** its namespace, its status, a pod's
+node, and the column you right-clicked. Only namespace and Only status set their
+pickers; the rest are written into the query box as `ns:=…` or `-node:=…`
+terms, so several exclusions add up and stay editable.
 
 ## Requirements
 

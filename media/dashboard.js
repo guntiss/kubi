@@ -2209,6 +2209,7 @@
   const QUERY_HELP = [
     'Plain words match anywhere in the row.',
     'field:value narrows to one column — status:Running, ns:kube-system, node:ip-10-0-1-5',
+    'field:=value matches the whole value — ns:=default leaves out default-apps',
     'Numbers and ages compare — restarts:>3, age:<2h, ready:<1',
     'A leading ! or minus excludes — !running, -status:Running, -kube',
     'Quote a value with spaces — reason:"Back-off restarting"',
@@ -3387,6 +3388,13 @@
    * rather than being compared as text and giving a confident wrong answer.
    */
   function compareCell(cell, op, value) {
+    // `=` is also how a term matches a whole value rather than part of one —
+    // ns:=default leaves out default-apps — which the row menu's Filter leans
+    // on. A bare number still compares as one, so ready:=1 is fully ready.
+    if (op === '=') {
+      if (cell.toLowerCase() === value.toLowerCase()) return true;
+      if (!/^-?\d+$/.test(value)) return false;
+    }
     const left = numericValue(cell);
     const right = numericValue(value);
     if (left === null || right === null) return false;
@@ -3414,12 +3422,15 @@
     return terms.every((term) => matchesTerm(row, term) !== term.negated);
   }
 
+  /** Whether the scope, namespace, status and `terms` all let `row` through. */
+  function passesFilters(row, terms) {
+    return inScope(row) && inNamespace(row) && inStatus(row) && matchesQuery(row, terms);
+  }
+
   /** The rows the scope, namespace, status and filter let through, unsorted. */
   function matchingRows() {
     const terms = parseQuery(state.filter, kindOf(state.active));
-    return state.rows.filter(
-      (row) => inScope(row) && inNamespace(row) && inStatus(row) && matchesQuery(row, terms)
-    );
+    return state.rows.filter((row) => passesFilters(row, terms));
   }
 
   function visibleRows() {
@@ -5916,7 +5927,9 @@
     // A row outside the selection, or a selection of one, gets its own menu.
     const ticked = isChecked(row) ? checkedRows() : [];
     const bulk = ticked.length > 1;
-    const items = bulk ? bulkMenuItems(kind, ticked) : rowMenuItems(kind, row);
+    // The column under the pointer, which the Filter submenu offers too.
+    const clicked = event.target.closest?.('td[data-col]')?.dataset.col ?? null;
+    const items = bulk ? bulkMenuItems(kind, ticked) : rowMenuItems(kind, row, clicked);
     // Held by key rather than by node: a refresh rewrites each row's classes
     // from state, and may rebuild the row outright, so the outline has to be
     // something the row renderers can ask about. A bulk menu outlines nothing;
@@ -6075,8 +6088,12 @@
     }));
   }
 
-  /** The menu for a single row: the detail panel's actions, plus a pod's logs and shell. */
-  function rowMenuItems(kind, row) {
+  /**
+   * The menu for a single row: the detail panel's actions, plus a pod's logs
+   * and shell, and filters built from its values. `clicked` is the column
+   * right-clicked, if any.
+   */
+  function rowMenuItems(kind, row, clicked) {
     // A pod's logs and shell are what it is most often right-clicked for, so
     // they sit at the top. No container is named: kubectl picks the pod's
     // default-container annotation, or its first container, and names it in
@@ -6093,6 +6110,7 @@
     // the object, so here it joins the other destinations under Go to.
     const pods = actions.find((a) => a.id === 'pods');
     const destinations = [...goToItems(kind, row), ...(pods ? [pods] : [])];
+    const filters = filterItems(kind, row, clicked);
     return [
       { label: 'Describe', run: () => { selectRow(row); openDetailTab('describe'); }, title: 'kubectl describe, in the detail panel' },
       ...(pod ? [
@@ -6110,6 +6128,7 @@
         }
       ].filter(Boolean) : []),
       ...(destinations.length ? [{ label: 'Go to', submenu: destinations }] : []),
+      ...(filters.length ? [{ label: 'Filter', submenu: filters }] : []),
       null,
       ...actions.filter((a) => a !== pods)
     ];
@@ -6172,6 +6191,125 @@
     }
     for (const link of row.links || []) jump(link);
     return items;
+  }
+
+  /**
+   * The fields the row menu's Filter narrows by, each with this row's value:
+   * its namespace and status, a pod's node, and the column right-clicked. A
+   * field qualifies where the query box can name it and match it whole — not
+   * a usage reading or an age, which move under the filter, nor an event's
+   * message, too long to be worth one — and where the row has a value in it.
+   */
+  function filterFields(kind, row, clicked) {
+    const fields = [];
+    const add = (key) => {
+      if (!key || fields.some((f) => f.key === key)) return;
+      const column = kind.columns.find((c) => c.key === key);
+      if (!column || column.metric || isAgeColumn(key) || key === 'message') return;
+      // A quote can't be written inside a quoted value, so such a value has
+      // no term that matches it.
+      const value = cellValue(row, key);
+      const field = queryField(kind, column);
+      if (!value || value.includes('"') || !field) return;
+      fields.push({ key, field, value, label: column.labelKey ? column.label : column.label.toLowerCase() });
+    };
+    if (namespaceApplies() && row.namespace) add('namespace');
+    add('status');
+    add('node');
+    add(clicked);
+    return fields;
+  }
+
+  /**
+   * What a column is called in the query box: `ns` for the namespace, a label
+   * column by its name with spaces removed, and the rest by their key. Null
+   * for one that can't be typed as a field.
+   */
+  function queryField(kind, column) {
+    if (column.key === 'namespace') return 'ns';
+    const name = column.labelKey ? column.label.toLowerCase().replace(/\s+/g, '') : column.key;
+    return /^[A-Za-z][\w.-]*$/.test(name) ? name : null;
+  }
+
+  /**
+   * The row menu's Filter: show only the rows sharing one of this row's
+   * values, or hide them, a field at a time. Only a namespace or a status is
+   * set on its picker, where the toolbar already shows it; everything else,
+   * and every exclusion, is written into the query box as a term that can be
+   * read and edited there.
+   */
+  function filterItems(kind, row, clicked) {
+    const items = [];
+    for (const field of filterFields(kind, row, clicked)) {
+      const shown = field.key === 'namespace'
+        ? state.namespace === field.value
+        : field.key === 'status' && state.status === `status:${field.value}`;
+      if (items.length) items.push(null);
+      // Showing only the namespace the picker is already on changes nothing.
+      if (!shown) {
+        items.push({
+          label: `Only ${field.label}`,
+          hint: field.value,
+          title: `Show only rows whose ${field.label} is ${field.value}`,
+          run: () => applyRowFilter(kind, row, field, false)
+        });
+      }
+      items.push({
+        label: `Exclude ${field.label}`,
+        hint: field.value,
+        title: `Hide rows whose ${field.label} is ${field.value}`,
+        run: () => applyRowFilter(kind, row, field, true)
+      });
+    }
+    if (items.length && filtersActive()) {
+      items.push(null, { label: 'Clear filters', title: 'Clear every filter', run: clearFilters });
+    }
+    return items;
+  }
+
+  /**
+   * The query with the terms on `key` taken out — those on `value` only, when
+   * it is given — so a Filter choice replaces what it contradicts or repeats
+   * rather than stacking a term beside it that leaves nothing on screen.
+   */
+  function queryWithout(kind, key, value) {
+    const keys = queryKeys(kind);
+    const aliases = queryAliases(kind);
+    return splitTerms(state.filter.trim()).filter((raw) => {
+      const term = parseTerm(raw, keys, aliases);
+      if (term.key !== key) return true;
+      return value !== undefined && term.value.toLowerCase() !== value.toLowerCase();
+    }).join(' ');
+  }
+
+  /** Applies a Filter choice: `field` narrowed to this row's value, or excluded. */
+  function applyRowFilter(kind, row, field, exclude) {
+    const { key, value } = field;
+    const term = `${exclude ? '-' : ''}${field.field}:=${/\s/.test(value) ? `"${value}"` : value}`;
+    const append = (query) => [query, term].filter(Boolean).join(' ');
+    const setNs = (ns) => {
+      state.namespace = ns;
+      post({ type: 'setNamespace', namespace: ns });
+    };
+    if (exclude) {
+      // A picker on the value excluded would leave nothing; everything else is what is wanted.
+      if (key === 'namespace' && state.namespace === value) setNs(state.allNamespaces);
+      if (key === 'status' && state.status === `status:${value}`) state.status = '';
+      state.filter = append(queryWithout(kind, key, value));
+    } else if (key === 'namespace') {
+      setNs(value);
+      state.filter = queryWithout(kind, key);
+    } else if (key === 'status' && row.status === value) {
+      state.status = `status:${value}`;
+      state.filter = queryWithout(kind, key);
+    } else {
+      state.filter = append(queryWithout(kind, key));
+    }
+    // A selection the filter now hides would leave the panel open on
+    // something no longer in the table.
+    if (state.selected && !passesFilters(state.selected, parseQuery(state.filter, kind))) selectRow(null);
+    renderFiltersOnly();
+    renderContentOnly();
   }
 
   function closeRowMenu() {
